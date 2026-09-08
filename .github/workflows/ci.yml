@@ -1,0 +1,86 @@
+# Continuous integration: the Python suite on Windows and Ubuntu, the Node
+# suite on Ubuntu.
+#
+# No test needs audio hardware.  The two smoke tests that touch the real
+# sounddevice (tests/test_audio_input.py::test_real_list_devices_smoke and
+# tests/test_player.py::test_real_output_smoke) skip when PortAudio cannot be
+# loaded or no device can be opened, and pass with an empty device list;
+# everything else runs against fake sounddevice modules.  libportaudio2 is
+# installed on Ubuntu so that `import sounddevice` succeeds there (the Linux
+# wheel does not bundle PortAudio) and those smoke tests exercise the real
+# library against the runner's empty device list instead of skipping at the
+# import.  Windows wheels bundle PortAudio.
+#
+# QT_QPA_PLATFORM=offscreen and the small set of Qt runtime libraries let a
+# PySide6 window be constructed without a display, which is how the desktop
+# UI (morse/ui.py, milestone M7) is smoke-tested; they are harmless for the
+# rest of the suite.
+#
+# Node 21+ treats the positional argument of `node --test` as a glob, so the
+# directory form `node --test web/test` no longer finds the files; the glob
+# below is what runs them, matching docs/INTERFACES.md.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Same quoting on both runners (`-o addopts=''`); Git Bash on Windows.
+    shell: bash
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install system libraries (PortAudio, Qt runtime)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libportaudio2 \
+            libegl1 libgl1 libopengl0 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 \
+            libdbus-1-3 libfontconfig1
+
+      - name: Install Python dependencies
+        run: python -m pip install . pytest
+
+      - name: Run the Python test suite
+        timeout-minutes: 20
+        run: python -m pytest -o addopts='' -q -rs
+
+      - name: Set up Node 24
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Run the Node test suite
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: node --test "web/test/*.test.mjs"

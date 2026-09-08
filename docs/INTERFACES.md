@@ -104,8 +104,9 @@ class ToneDetector:
                  min_run_blocks: int = 2, min_lift_db: float = 12.0, max_lift_db: float = 30.0,
                  min_off_lift_db: float = 6.0, noise_alpha_up: float = 0.1,
                  noise_alpha_down: float = 0.1, signal_alpha: float = 0.1,
-                 signal_decay_db: float = 0.05, silence_floor_db: float = -100.0,
-                 warmup_blocks: int = 30, max_on_blocks: int = 500): ...
+                 signal_decay_db: float = 0.1, silence_floor_db: float = -100.0,
+                 warmup_blocks: int = 30, max_on_blocks: int = 500,
+                 release_db: float = 12.0, hysteresis_db: float = 3.0): ...
     def update(self, power_db: float) -> list[Run]
         # feed one block; returns runs that are now final (debounced), oldest first,
         # usually [] and occasionally one or more
@@ -114,8 +115,8 @@ class ToneDetector:
     state: bool                          # current ON/OFF verdict
     floor_db: float                      # tracked noise level N (mean of OFF-block power, in dB)
     peak_db: float                       # tracked signal level S (mean of ON-block power, in dB)
-    threshold_hi_db: float               # N + lift_on
-    threshold_lo_db: float               # N + lift_off
+    threshold_hi_db: float               # max(N + lift_on, threshold_lo_db + hysteresis_db)
+    threshold_lo_db: float               # max(N + lift_off, S - release_db)
     current_run: Run                     # the in-progress run (not yet final)
     warming_up: bool                     # True during the first warmup_blocks after construction or reset
 ```
@@ -357,8 +358,9 @@ microphone is open is allowed: output and input are separate streams.
 ## Web app (`web/`)
 
 Plain ES modules, no bundler, no framework. Everything under `web/js/` except
-`audio.js`, `player.js` and `app.js` must run in Node 24 without a DOM so the
-tests can exercise it. Mirror the Python names so the two implementations can
+`audio.js`, `player.js`, `app.js` and `worklet.js` (an AudioWorkletProcessor,
+which only exists inside an audio rendering thread) must run in Node 24
+without a DOM so the tests can exercise it. Mirror the Python names so the two implementations can
 be compared side by side.
 
 ```
@@ -412,7 +414,7 @@ dB series per block from `morse.dsp.Goertzel` (rounded to 0.1 dB) so the
 JavaScript Goertzel can be checked against Python on real audio.
 
 Deployment: `.github/workflows/pages.yml` runs on push to `main`: checkout,
-Node 24, `node --test web/test`, `actions/upload-pages-artifact` with
+Node 24, `node --test "web/test/*.test.mjs"` (Node 21+ treats the argument as a glob, not a directory), `actions/upload-pages-artifact` with
 `path: web`, `actions/deploy-pages`. Repository Pages source is "GitHub
 Actions".
 
@@ -439,7 +441,7 @@ packaging/morse-console.spec      PyInstaller spec: entry morse/__main__.py (add
                                   as morse-console-windows-x64.zip, create the GitHub Release with that zip
                                   and a source zip (git archive)
 .github/workflows/ci.yml          on push and pull request: run pytest on windows-latest and ubuntu-latest,
-                                  and node --test web/test on ubuntu-latest
+                                  and node --test "web/test/*.test.mjs" on ubuntu-latest
 ```
 
 `morse.app.main(argv=None) -> int` must exist and be the single entry point.

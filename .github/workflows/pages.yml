@@ -1,0 +1,64 @@
+# Deploy the browser app (web/) to GitHub Pages.
+#
+# The repository's Pages source must be set to "GitHub Actions" (Settings >
+# Pages).  Every push to main runs the Node test suite first, then publishes
+# the whole web/ directory as the site, so the page is served at
+# https://jetzhu.github.io/MorseCodeAudioCoder/ with its relative paths intact.
+# Nothing is excluded: web/mock.html ships as the design reference.
+#
+# The Node tests read the WAV fixtures under tests/fixtures, so the checkout
+# has to be a full working tree, not just web/.
+#
+# Node 21+ treats the positional argument of `node --test` as a glob, so the
+# directory form `node --test web/test` no longer finds the files; the glob
+# below is what runs them, matching docs/INTERFACES.md.
+
+name: Deploy web app to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a run already in progress is allowed to finish so
+# the site never ends up half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Run the Node test suite
+        timeout-minutes: 10
+        run: node --test "web/test/*.test.mjs"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload web/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

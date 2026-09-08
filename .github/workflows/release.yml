@@ -1,0 +1,99 @@
+# Build the self-contained Windows app and publish a GitHub Release.
+#
+# Runs when a version tag is pushed (`git tag v0.1.0 && git push origin v0.1.0`).
+# The tag must equal `v` + morse.__version__ (morse/__init__.py), which
+# pyproject.toml also reads, so a release can never carry a version that
+# disagrees with the package inside it.
+#
+# Steps: install the requirements and PyInstaller, run the Python suite, build
+# the one-folder app from packaging/morse-console.spec, smoke-test the frozen
+# executable (device listing exercises the bundled PortAudio DLL; decoding the
+# loopback fixture exercises numpy, scipy and the morse package), zip it as
+# morse-console-windows-x64.zip, archive the tagged source tree, and attach
+# both to a Release whose notes GitHub generates from the commits since the
+# previous tag.
+#
+# Bash is the default shell so the pytest invocation matches ci.yml; the zip
+# step uses PowerShell for Compress-Archive.  QT_QPA_PLATFORM=offscreen lets
+# the UI's offscreen smoke tests run on the display-less runner.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows:
+    name: Build and release (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies and PyInstaller
+        run: python -m pip install . pyinstaller pytest
+
+      - name: Check that the tag matches morse.__version__
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(python -c 'import morse; print(morse.__version__)')"
+          if [ "${tag}" != "${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match morse.__version__ = ${version}"
+            exit 1
+          fi
+          echo "releasing morse-console ${version}"
+
+      - name: Run the Python test suite
+        timeout-minutes: 20
+        run: python -m pytest -o addopts='' -q
+
+      - name: Build the one-folder app
+        timeout-minutes: 15
+        run: python -m PyInstaller --noconfirm --clean packaging/morse-console.spec
+
+      - name: Smoke-test the frozen executable
+        run: |
+          ./dist/morse-console/morse-console.exe --list-devices
+          text="$(./dist/morse-console/morse-console.exe --wav tests/fixtures/loopback_sos_1khz_15wpm.wav --freq 1000)"
+          echo "decoded: ${text}"
+          test "${text}" = "SOS"
+          du -sh dist/morse-console
+
+      - name: Zip the app as morse-console-windows-x64.zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/morse-console -DestinationPath morse-console-windows-x64.zip
+
+      - name: Archive the source tree
+        run: |
+          git archive --format=zip --prefix="morse-console-${GITHUB_REF_NAME}/" \
+            --output="morse-console-${GITHUB_REF_NAME}-source.zip" HEAD
+          ls -l ./*.zip
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            morse-console-windows-x64.zip
+            morse-console-${{ github.ref_name }}-source.zip

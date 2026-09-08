@@ -1,0 +1,324 @@
+/**
+ * Morse timing decoder: turns final ON/OFF runs into text.
+ *
+ * Line-by-line port of `morse/decoder.py`; the Python module is the reference
+ * and `web/test/vectors.json` pins both to the same numbers. The decoder
+ * consumes {@link Run} objects one at a time and keeps an adaptive estimate of
+ * the dit length `T` (`ditMs`) and of the reverb offset `d` (`offsetMs`) that
+ * lengthens every mark and shortens every gap by the same amount.
+ *
+ * Timing rule
+ * -----------
+ * Keep the last `window` raw mark lengths and gap lengths. `M` is the 10th
+ * percentile of the marks and `G` the 10th percentile of the gaps after
+ * capping each gap at `20 * M`. Percentiles use the nearest-rank method:
+ * sort ascending and take the element at 1-based rank `ceil(q / 100 * n)`
+ * (so the minimum for `n <= 10`, the 2nd smallest for `11 <= n <= 20`, the
+ * 3rd smallest for `n = 30`); never interpolate between order statistics.
+ *
+ * Then `T = (M + G) / 2` and `d = (M - G) / 2`; if `d < 0` use `T = M` and
+ * `d = 0`. With fewer than two marks or one gap the estimate falls back to
+ * `T = 1200 / wpm` when a speed was given, else `T = 150 ms`, and `d = 0`.
+ * When `adaptive` is false and `wpm` was given, `T` stays fixed and only `d`
+ * adapts.
+ *
+ * Marks are corrected as `ms - d` and gaps as `ms + d`. A corrected mark
+ * `< 2T` is a dit, otherwise a dah. A corrected gap `< 2T` is inside a
+ * letter, `2T..5T` ends the letter and `>= 5T` ends the word (one space).
+ * Unknown symbol sequences emit `?`. A leading gap before any mark emits
+ * nothing and is not used for timing.
+ *
+ * A mark of `maxMarkMs` or longer (default 5000 ms) is not a symbol: it is
+ * ignored, the pending buffer is cleared and nothing is emitted, so a held
+ * button or a detector timeout never produces `?` or disturbs the letter that
+ * follows. The comparison uses the measured length before the offset
+ * correction (`ms >= maxMarkMs`). An ignored mark is not used for timing and
+ * increments neither `letterCount` nor `unknownCount`.
+ *
+ * ES module with no DOM or Web Audio dependency; runs in Node for the tests.
+ */
+
+import { lookup } from "./table.js";
+
+/** Dit length (ms) used before enough runs have arrived and no WPM was given. */
+export const DEFAULT_DIT_MS = 150.0;
+
+/** Measured marks this long or longer (ms) are not symbols and are ignored. */
+export const DEFAULT_MAX_MARK_MS = 5000.0;
+
+const PERCENTILE = 10.0;
+const GAP_CAP_FACTOR = 20.0;
+const DIT_DAH_SPLIT = 2.0; // corrected mark >= this * T is a dah
+const LETTER_GAP = 2.0; // corrected gap >= this * T ends the letter
+const WORD_GAP = 5.0; // corrected gap >= this * T ends the word
+const IDLE_FLUSH = 7.0; // idle OFF (corrected) > this * T flushes the pending letter
+
+/**
+ * Return the q-th percentile of `values` by the nearest-rank method.
+ *
+ * This is the reference definition of "percentile" for the timing rule: sort
+ * ascending and take the element at 1-based rank `ceil(q / 100 * n)`, clamped
+ * to `1..n`. The result is always one of the observed values; for `q = 10` it
+ * is the minimum when `n <= 10`, the 2nd smallest for `11 <= n <= 20` and the
+ * 3rd smallest for `n = 30`. The arithmetic (`q / 100 * n`, left to right) is
+ * the same IEEE expression as the Python reference, so the rank matches
+ * bit for bit.
+ *
+ * @param {Iterable<number>} values non-empty
+ * @param {number} q percentile in 0..100
+ * @returns {number}
+ * @throws {RangeError} when `values` is empty
+ */
+export function nearestRankPercentile(values, q) {
+  const ordered = Array.from(values).sort((a, b) => a - b);
+  const n = ordered.length;
+  if (n === 0) throw new RangeError("percentile of an empty sequence");
+  const rank = Math.ceil((q / 100.0) * n);
+  const index = Math.min(Math.max(rank - 1, 0), n - 1);
+  return ordered[index];
+}
+
+/**
+ * Fixed-capacity sliding window (the port of `collections.deque(maxlen=n)`).
+ * @template T
+ */
+class SlidingWindow {
+  /** @param {number} maxlen */
+  constructor(maxlen) {
+    this.maxlen = maxlen;
+    /** @type {T[]} */
+    this.items = [];
+  }
+
+  /** @param {T} value */
+  push(value) {
+    this.items.push(value);
+    if (this.items.length > this.maxlen) this.items.shift();
+  }
+
+  clear() {
+    this.items.length = 0;
+  }
+
+  get length() {
+    return this.items.length;
+  }
+}
+
+/**
+ * Timing state machine that decodes final runs into text.
+ *
+ * Public state, mirroring the Python attributes:
+ * - `ditMs`: current dit-length estimate `T` in ms.
+ * - `offsetMs`: current reverb correction `d` in ms (marks measure `d` too
+ *   long, gaps `d` too short).
+ * - `wpm`: `1200 / ditMs` (read-only getter).
+ * - `maxMarkMs`: a mark measured this long or longer is ignored (settable).
+ * - `buffer`: pending symbols of the letter in progress, e.g. `".-"`.
+ * - `text`: everything emitted so far.
+ * - `letterCount`: letters emitted (unknown `?` included).
+ * - `unknownCount`: unknown symbol sequences emitted as `?`.
+ */
+export class MorseDecoder {
+  /**
+   * @param {object} [options]
+   * @param {number | null} [options.wpm=null] optional keying speed; seeds
+   *   `T = 1200 / wpm` until enough runs have arrived (and fixes it when
+   *   `adaptive` is false). Must be positive when given.
+   * @param {boolean} [options.adaptive=true] when false and `wpm` is given,
+   *   `T` never changes and only the offset `d` adapts to the measured runs.
+   * @param {number} [options.window=30] number of recent marks and of recent
+   *   gaps kept for the timing estimate; at least 2.
+   * @param {number} [options.maxMarkMs=5000] marks measured this long or
+   *   longer are not symbols and are ignored; `Infinity` disables the rule.
+   *   Must be positive.
+   * @throws {RangeError} on an invalid option
+   */
+  constructor({ wpm = null, adaptive = true, window = 30, maxMarkMs = DEFAULT_MAX_MARK_MS } = {}) {
+    if (wpm !== null && wpm !== undefined && !(wpm > 0)) {
+      throw new RangeError(`wpm must be positive, got ${wpm}`);
+    }
+    if (!(window >= 2)) {
+      throw new RangeError(`window must be at least 2, got ${window}`);
+    }
+    if (!(maxMarkMs > 0)) {
+      throw new RangeError(`maxMarkMs must be positive, got ${maxMarkMs}`);
+    }
+    /** @type {number | null} */
+    this._wpm = wpm === null || wpm === undefined ? null : Number(wpm);
+    /** @type {boolean} */
+    this._adaptive = Boolean(adaptive);
+    /** @type {number} */
+    this._window = Math.trunc(window);
+    /** @type {number} */
+    this.maxMarkMs = Number(maxMarkMs);
+    /** @type {SlidingWindow<number>} */
+    this._marks = new SlidingWindow(this._window);
+    /** @type {SlidingWindow<number>} */
+    this._gaps = new SlidingWindow(this._window);
+    /** @type {boolean} */
+    this._seenMark = false;
+
+    /** @type {number} */
+    this.ditMs = this._seedDitMs();
+    /** @type {number} */
+    this.offsetMs = 0.0;
+    /** @type {string} */
+    this.buffer = "";
+    /** @type {string} */
+    this.text = "";
+    /** @type {number} */
+    this.letterCount = 0;
+    /** @type {number} */
+    this.unknownCount = 0;
+  }
+
+  // ---------------------------------------------------------------- public
+
+  /** Current speed estimate, `1200 / ditMs`. @returns {number} */
+  get wpm() {
+    return 1200.0 / this.ditMs;
+  }
+
+  /**
+   * Consume one final run and return the newly emitted text.
+   *
+   * Marks append a dit or dah to `buffer` and return `""`. Gaps return the
+   * letter they close (`""` for an intra-letter gap), plus a space when they
+   * close a word. Everything returned is also appended to `text`.
+   *
+   * A mark measured `maxMarkMs` or longer is not a symbol (a held button, or
+   * the detector's stuck-ON timeout): it clears `buffer`, returns `""`,
+   * leaves the timing estimate and the counters alone, and the gap after it
+   * is handled as usual, so the next letter decodes cleanly.
+   *
+   * @param {{on: boolean, ms: number}} run a final run (a {@link Run})
+   * @returns {string}
+   */
+  feed(run) {
+    const ms = Number(run.ms);
+    if (run.on) {
+      if (ms >= this.maxMarkMs) {
+        this.buffer = "";
+        return "";
+      }
+      this._marks.push(ms);
+      this._seenMark = true;
+      this._updateTiming();
+      const corrected = ms - this.offsetMs;
+      this.buffer += corrected < DIT_DAH_SPLIT * this.ditMs ? "." : "-";
+      return "";
+    }
+
+    if (!this._seenMark) {
+      return ""; // leading silence carries no information
+    }
+    this._gaps.push(ms);
+    this._updateTiming();
+    const corrected = ms + this.offsetMs;
+    if (corrected < LETTER_GAP * this.ditMs) {
+      return "";
+    }
+    let emitted = this._flushLetter();
+    if (corrected >= WORD_GAP * this.ditMs) {
+      emitted += this._endWord();
+    }
+    return emitted;
+  }
+
+  /**
+   * Report the length of the current, unfinished OFF run.
+   *
+   * Once `offMs + offsetMs > 7 * ditMs` the pending letter is decoded and a
+   * space appended, so the last letter of a message appears without waiting
+   * for the next tone. Returns the newly emitted text; with an empty `buffer`
+   * nothing happens, so the flush occurs exactly once. `Infinity` flushes
+   * unconditionally (end of stream).
+   *
+   * @param {number} offMs
+   * @returns {string}
+   */
+  idle(offMs) {
+    if (!this.buffer) return "";
+    if (offMs + this.offsetMs > IDLE_FLUSH * this.ditMs) {
+      return this._flushLetter() + this._endWord();
+    }
+    return "";
+  }
+
+  /**
+   * Clear the text, the pending letter and the counters.
+   *
+   * With `keepTiming` the recent-run windows and the current `T` and `d`
+   * survive; otherwise timing returns to the seed values. `maxMarkMs` is
+   * never touched.
+   *
+   * @param {boolean} [keepTiming=false]
+   */
+  reset(keepTiming = false) {
+    this.buffer = "";
+    this.text = "";
+    this.letterCount = 0;
+    this.unknownCount = 0;
+    this._seenMark = false;
+    if (!keepTiming) {
+      this._marks.clear();
+      this._gaps.clear();
+      this._updateTiming();
+    }
+  }
+
+  // --------------------------------------------------------------- private
+
+  /** @returns {number} */
+  _seedDitMs() {
+    return this._wpm !== null ? 1200.0 / this._wpm : DEFAULT_DIT_MS;
+  }
+
+  /** Recompute `ditMs` and `offsetMs` from the recent runs. */
+  _updateTiming() {
+    const seed = this._seedDitMs();
+    if (this._marks.length < 2 || this._gaps.length < 1) {
+      this.ditMs = seed;
+      this.offsetMs = 0.0;
+      return;
+    }
+    const m = nearestRankPercentile(this._marks.items, PERCENTILE);
+    const cap = GAP_CAP_FACTOR * m;
+    const g = nearestRankPercentile(this._gaps.items.map((gap) => Math.min(gap, cap)), PERCENTILE);
+    const d = (m - g) / 2.0;
+    if (!this._adaptive && this._wpm !== null) {
+      this.ditMs = seed;
+      this.offsetMs = Math.max(d, 0.0);
+      return;
+    }
+    if (d < 0.0) {
+      this.ditMs = m;
+      this.offsetMs = 0.0;
+    } else {
+      this.ditMs = (m + g) / 2.0;
+      this.offsetMs = d;
+    }
+  }
+
+  /** Decode `buffer` into one character, append it and return it. @returns {string} */
+  _flushLetter() {
+    if (!this.buffer) return "";
+    let char = lookup(this.buffer);
+    if (char === null) {
+      char = "?";
+      this.unknownCount += 1;
+    }
+    this.letterCount += 1;
+    this.buffer = "";
+    this.text += char;
+    return char;
+  }
+
+  /** Append exactly one space after the last word, if not already there. @returns {string} */
+  _endWord() {
+    if (!this.text || this.text.endsWith(" ")) return "";
+    this.text += " ";
+    return " ";
+  }
+}

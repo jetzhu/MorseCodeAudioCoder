@@ -1,0 +1,54 @@
+# Packaging metadata for the desktop / command-line app (docs/INTERFACES.md,
+# section "Packaging").  `pip install .` installs the `morse` package and the
+# `morse-console` command; `pip install .[dev]` adds pytest.  The version is
+# read from morse/__init__.py so it is defined in exactly one place; the
+# release workflow (.github/workflows/release.yml) checks the pushed tag
+# against it.  Runtime dependencies mirror requirements.txt, which stays the
+# file the CI and the README's venv setup install from.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "morse-console"
+dynamic = ["version"]
+description = "Listen to a PC beeper through the microphone and decode its Morse code, with a live pyqtgraph console."
+readme = "README.md"
+requires-python = ">=3.13"
+keywords = ["morse", "audio", "goertzel", "beeper", "decoder", "pyqtgraph"]
+classifiers = [
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sounddevice>=0.5",
+    "pyqtgraph>=0.13",
+    "PySide6>=6.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+morse-console = "morse.app:main"
+
+[project.urls]
+Homepage = "https://github.com/jetzhu/MorseCodeAudioCoder"
+"Web app" = "https://jetzhu.github.io/MorseCodeAudioCoder/"
+Releases = "https://github.com/jetzhu/MorseCodeAudioCoder/releases"
+
+[tool.setuptools]
+packages = ["morse"]
+
+[tool.setuptools.dynamic]
+version = {attr = "morse.__version__"}

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beeper Morse Console</title>
+<meta name="description" content="Decode a PC beeper's Morse code from the microphone, in the browser. Nothing leaves this machine.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231B2126'/%3E%3Ccircle cx='8' cy='16' r='3' fill='%23EFA24E'/%3E%3Crect x='14' y='13' width='12' height='6' rx='3' fill='%23EFA24E'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="page">
+  <div class="intro">
+    <div>
+      <div class="eyebrow">Browser decoder · runs entirely on this machine</div>
+      <h1>Beeper Morse Console</h1>
+      <p>Press <b>Start</b>, allow the microphone, and key Morse on the beeper. The page measures the tone
+        power every 10 ms, tracks the noise floor, and turns marks and gaps into letters. Audio never leaves
+        this computer. If Windows audio enhancements chop the signal, the desktop app below reads the raw microphone.</p>
+    </div>
+    <div class="facts mono">
+      <div>Tone<b id="factTone">2491 Hz</b></div>
+      <div>Sample rate<b id="factRate">—</b></div>
+      <div>Block<b id="factBlock">10 ms</b></div>
+      <div>Refresh<b>30 fps</b></div>
+    </div>
+  </div>
+
+  <div class="win" id="win" aria-label="Beeper Morse Console">
+    <div class="titlebar">
+      <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="name">Beeper Morse Console</span>
+      <span>—</span>
+      <span class="mono" id="titleDev">microphone closed</span>
+    </div>
+
+    <div class="toolbar">
+      <button class="ctl primary start" id="startBtn" title="Open the microphone and start decoding">Start</button>
+      <div class="field">
+        <label for="dev">Input</label>
+        <select id="dev" class="ctl" aria-label="Input device">
+          <option value="">Default microphone</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f0">Tone</label>
+        <input id="f0" class="ctl mono" type="number" value="2491" min="100" max="20000" step="1" aria-label="Tone frequency in hertz">
+        <span class="mono unit">Hz</span>
+        <button class="ctl" id="autoBtn" title="Hold a beep for one second" disabled>Auto-detect</button>
+      </div>
+      <div class="field">
+        <label id="speedLabel">Speed</label>
+        <div class="seg" role="group" aria-labelledby="speedLabel">
+          <button id="wpmAuto" aria-pressed="true" type="button">Auto</button>
+          <button id="wpmManual" aria-pressed="false" type="button">Manual</button>
+        </div>
+        <input id="wpmVal" class="ctl mono" type="number" value="8" min="3" max="40" step="1" disabled aria-label="Words per minute">
+        <span class="mono unit">WPM</span>
+      </div>
+      <div class="spacer"></div>
+      <button class="ctl" id="pauseBtn" disabled title="Freeze decoding and the plots; the microphone stays open">Pause</button>
+      <button class="ctl" id="saveBtn" disabled title="Write the last 30 seconds of raw input to a WAV file">Save 30 s</button>
+      <button class="ctl" id="clearBtn" title="Clear the decoded text; timing estimates are kept">Clear text</button>
+    </div>
+
+    <div class="msgbar error" id="msgBar" role="alert" hidden>
+      <span class="icon" aria-hidden="true">!</span>
+      <span class="txt" id="msgText"></span>
+      <button class="x" id="msgDismiss" aria-label="Dismiss" title="Dismiss">×</button>
+    </div>
+    <div class="msgbar" id="chopHint" role="status" hidden>
+      <span class="icon" aria-hidden="true">!</span>
+      <span class="txt">The microphone signal looks processed. In Windows Sound settings turn off Audio enhancements for this microphone.</span>
+      <button class="x" id="chopDismiss" aria-label="Dismiss hint" title="Dismiss">×</button>
+    </div>
+    <div class="msgbar note" id="noteBar" role="status" hidden>
+      <span class="icon" aria-hidden="true">i</span>
+      <span class="txt" id="noteText"></span>
+      <button class="x" id="noteDismiss" aria-label="Dismiss" title="Dismiss">×</button>
+    </div>
+
+    <div class="body">
+      <div class="main">
+        <section class="panel" aria-label="Spectrum">
+          <header>Spectrum <span id="specInfo">0–8 kHz · 2048-point FFT</span><span class="tag">A</span></header>
+          <div class="plot"><canvas id="specCanvas"></canvas></div>
+        </section>
+
+        <section class="panel" id="powerPlot" aria-label="Tone power">
+          <header>Tone power at <span id="f0Label" class="mono">2491 Hz</span> <span>· last 10 s · threshold with hysteresis</span><span class="tag">B</span></header>
+          <div class="plot"><canvas id="powerCanvas"></canvas></div>
+          <div class="plot"><canvas id="stripCanvas"></canvas></div>
+        </section>
+
+        <section class="panel" aria-label="Decoded text">
+          <header>Decoded <span>· letters appear at each gap, a long gap adds a space</span><span class="tag">C</span></header>
+          <div class="decoded">
+            <div class="tape">
+              <div class="live">
+                <span>Current letter</span>
+                <span class="sym mono" id="symBuf">&nbsp;</span>
+                <span id="symHint" class="unit"></span>
+              </div>
+              <div class="text mono" id="textOut" aria-live="polite"></div>
+            </div>
+            <div class="timing mono">
+              <span class="k">Dit</span><span class="v" id="ditV">— ms</span>
+              <span class="k">Dah</span><span class="v" id="dahV">— ms</span>
+              <span class="k">Letter gap</span><span class="v" id="lgapV">— ms</span>
+              <span class="k">Reverb offset</span><span class="v" id="offV">— ms</span>
+              <span class="k full" style="margin-top:4px">Mark lengths, last 30</span>
+              <div class="hist"><canvas id="histCanvas"></canvas></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="rail" aria-label="Readouts">
+        <div class="block">
+          <h4>Input level</h4>
+          <div class="meter">
+            <div class="scale mono">
+              <span style="top:0%">0</span><span style="top:22%">-20</span><span style="top:44%">-40</span><span style="top:66%">-60</span><span style="top:88%">-80</span>
+            </div>
+            <canvas id="meterCanvas"></canvas>
+          </div>
+          <div class="wave"><canvas id="waveCanvas"></canvas></div>
+          <div class="eyebrow" style="margin-top:6px">Band-passed input · 6 ms</div>
+        </div>
+        <div class="block readouts">
+          <div class="ro"><span class="k">Detector</span><span id="statePill" class="pill"><i></i>OFF</span></div>
+          <div class="ro"><span class="k">Level</span><span class="v mono" id="lvlV">—<small>dBFS</small></span></div>
+          <div class="ro"><span class="k">Signal / floor</span><span class="v mono" id="snrV">—<small>dB</small></span></div>
+          <div class="ro"><span class="k">Speed</span><span class="v mono" id="wpmV">—<small>WPM</small></span></div>
+          <div class="ro"><span class="k">Letters</span><span class="v mono" id="cntV">0</span></div>
+          <div class="ro"><span class="k">Unknown</span><span class="v mono" id="unkV">0</span></div>
+        </div>
+        <div class="block tip">
+          Threshold and speed adapt on their own. Turn <b>Manual</b> on if the keying is very irregular.
+        </div>
+      </aside>
+    </div>
+
+    <section class="encode" aria-label="Encode a message">
+      <header>Encode <span>· type a message, read it as Morse, follow the keying guide or play it</span><span class="tag">D</span></header>
+      <div class="enc-body">
+        <div class="enc-left">
+          <div class="enc-row">
+            <input id="encIn" class="ctl mono" type="text" value="HELLO WORLD" placeholder="Type a message" aria-label="Message to encode" spellcheck="false" autocomplete="off">
+            <div class="field"><label for="encWpm">Speed</label><input id="encWpm" class="ctl mono" type="number" value="8" min="3" max="40" step="1" aria-label="Encoding speed in words per minute"> <span class="mono unit">WPM</span></div>
+            <button class="ctl" id="encPlay" title="Key the tone through this machine's speakers">Play tone</button>
+            <button class="ctl" id="encCopy" title="Copy the Morse to the clipboard">Copy</button>
+          </div>
+          <div class="enc-out mono" id="encOut" aria-live="polite"></div>
+          <div class="enc-guide"><canvas id="encCanvas"></canvas></div>
+        </div>
+        <div class="enc-right readouts">
+          <div class="ro"><span class="k">Duration</span><span class="v mono" id="encDur">—<small>s</small></span></div>
+          <div class="ro"><span class="k">Dit · dah</span><span class="v mono" id="encDit">—</span></div>
+          <div class="ro"><span class="k">Letter gap · word gap</span><span class="v mono" id="encGap">—</span></div>
+          <div class="ro"><span class="k">Tone</span><span class="v mono" id="encTone">2491<small>Hz</small></span></div>
+          <div class="tip">Play keys the tone through this machine's speakers, so the decoder above can be tested without the desktop.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="statusbar mono">
+      <span><span class="dot" id="stateDot">○</span> <span id="stateV">Ready — press Start</span></span>
+      <span id="blockV">10 ms blocks</span>
+      <span id="dropV">0 dropped</span>
+      <span id="clockV">00:00</span>
+      <span class="right" id="rateV"></span>
+    </div>
+  </div>
+
+  <section class="dl" id="download" aria-label="Desktop app">
+    <div>
+      <div class="eyebrow">Desktop app</div>
+      <h2>Morse Console for Windows</h2>
+      <p>The same decoder and encoder as a desktop program. It reads the raw microphone endpoint, so it also
+        works on machines where the browser only gets a processed signal, and it needs no browser and no
+        internet connection.</p>
+      <p class="muted" id="dlNote">Looking up the latest release…</p>
+    </div>
+    <div class="assets" id="dlAssets">
+      <span class="k">Downloads</span>
+      <span class="muted">Fetching the release list from GitHub…</span>
+    </div>
+  </section>
+
+  <div class="notes">
+    <div class="note"><span class="tag">A</span><div><h3>Spectrum</h3><p>What the microphone hears, 0 to 8 kHz. The amber marker sits on the tone frequency; the faint marker at 3f shows a beeper's third harmonic. Auto-detect averages this view for a second and snaps the marker to the strongest peak.</p></div></div>
+    <div class="note"><span class="tag">B</span><div><h3>Tone power and ON/OFF strip</h3><p>Energy at the tone frequency, one point per 10 ms, scrolling over the last 10 seconds. The dashed pair is the hysteresis threshold, drawn from the tracked floor and signal. The strip beneath is the detector's verdict, the tape a Morse operator would read.</p></div></div>
+    <div class="note"><span class="tag">C</span><div><h3>Decoded text and timing</h3><p>The letter being keyed builds up as dots and dashes and is committed at the next letter gap. On the right, the live estimates that drive the decoder: dit, dah, letter gap and the reverb offset, plus a histogram of recent mark lengths that should show two clusters.</p></div></div>
+    <div class="note"><span class="tag">D</span><div><h3>Encode</h3><p>Type English, read the Morse. Letters are separated by a space and words by a slash. The bar underneath is the keying guide: marks and gaps drawn to scale at the chosen speed, with each letter labelled, so you can follow it while pressing the button. Play keys the tone through the speakers and runs a playhead along the guide.</p></div></div>
+    <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
+    <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Browsers get the microphone as Windows shares it, enhancements included. If marks arrive as 10 ms fragments the page says so; turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
+  </div>
+
+  <div class="foot">
+    Chrome or Edge recommended. Source and issues: <a href="https://github.com/jetzhu/MorseCodeAudioCoder">github.com/jetzhu/MorseCodeAudioCoder</a>.
+    The <a href="mock.html">design mock</a> shows the same window on simulated audio.
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
