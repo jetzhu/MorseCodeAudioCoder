@@ -1,0 +1,876 @@
+<title>Beeper Morse Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #E4E7EA;
+    --page-ink: #1B2126;
+    --panel: #F6F7F8;
+    --panel-2: #EBEEF0;
+    --chrome: #D6DADF;
+    --line: #C3C9CF;
+    --grid: #DCE0E4;
+    --ink: #1B2126;
+    --ink-2: #4A545D;
+    --ink-3: #7B858E;
+    --trace: #B8621A;
+    --trace-fill: rgba(184, 98, 26, 0.16);
+    --spec: #276A85;
+    --spec-fill: rgba(39, 106, 133, 0.14);
+    --on: #B8621A;
+    --off: #CBD0D5;
+    --thr: #6D5AA6;
+    --good: #2E7D4F;
+    --focus: #276A85;
+    --shadow: 0 18px 40px rgba(27, 33, 38, 0.16), 0 2px 6px rgba(27, 33, 38, 0.10);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141719;
+      --page-ink: #E3E7EA;
+      --panel: #1D2124;
+      --panel-2: #242a2e;
+      --chrome: #2A3035;
+      --line: #353C42;
+      --grid: #282E33;
+      --ink: #E3E7EA;
+      --ink-2: #A5ADB4;
+      --ink-3: #6E777F;
+      --trace: #EFA24E;
+      --trace-fill: rgba(239, 162, 78, 0.18);
+      --spec: #62B3D2;
+      --spec-fill: rgba(98, 179, 210, 0.16);
+      --on: #EFA24E;
+      --off: #343B41;
+      --thr: #A796DB;
+      --good: #5CB77F;
+      --focus: #62B3D2;
+      --shadow: 0 18px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141719;
+    --page-ink: #E3E7EA;
+    --panel: #1D2124;
+    --panel-2: #242a2e;
+    --chrome: #2A3035;
+    --line: #353C42;
+    --grid: #282E33;
+    --ink: #E3E7EA;
+    --ink-2: #A5ADB4;
+    --ink-3: #6E777F;
+    --trace: #EFA24E;
+    --trace-fill: rgba(239, 162, 78, 0.18);
+    --spec: #62B3D2;
+    --spec-fill: rgba(98, 179, 210, 0.16);
+    --on: #EFA24E;
+    --off: #343B41;
+    --thr: #A796DB;
+    --good: #5CB77F;
+    --focus: #62B3D2;
+    --shadow: 0 18px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--page-ink);
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .mono { font-family: "IBM Plex Mono", Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 36px 24px 64px; display: grid; gap: 28px; }
+  .intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; }
+  .intro h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+  .intro p { margin: 6px 0 0; color: var(--ink-2); max-width: 62ch; }
+  .eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+  .facts { display: grid; grid-auto-flow: column; gap: 18px; font-size: 13px; color: var(--ink-2); }
+  .facts b { display: block; font-weight: 500; color: var(--ink); font-size: 15px; }
+
+  /* ---------- the app window ---------- */
+  .win {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 13px;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--chrome); border-bottom: 1px solid var(--line);
+    color: var(--ink-2); font-size: 12.5px;
+  }
+  .titlebar .dots { display: inline-flex; gap: 6px; margin-right: 4px; }
+  .titlebar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: block; }
+  .titlebar .name { font-weight: 600; color: var(--ink); }
+  .toolbar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+  }
+  .field { display: inline-flex; align-items: center; gap: 8px; }
+  .field label { color: var(--ink-2); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .ctl {
+    height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--panel); color: var(--ink); font: inherit; font-size: 13px;
+  }
+  .ctl.mono { width: 88px; text-align: right; }
+  select.ctl { min-width: 250px; }
+  button.ctl { cursor: pointer; padding: 0 12px; }
+  button.ctl:hover { border-color: var(--ink-3); }
+  button.ctl.primary { background: var(--trace); border-color: var(--trace); color: #fff; font-weight: 500; }
+  button.ctl.primary:hover { filter: brightness(1.05); }
+  .ctl:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .seg button { height: 28px; border: 0; background: var(--panel); color: var(--ink-2); font: inherit; font-size: 12.5px; padding: 0 10px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+  .spacer { flex: 1; }
+
+  .body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
+  .main { display: grid; grid-template-rows: 212px 232px 168px; border-right: 1px solid var(--line); }
+  .panel { position: relative; border-bottom: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  .panel:last-child { border-bottom: 0; }
+  .panel header {
+    display: flex; align-items: baseline; gap: 10px; padding: 8px 14px 0;
+    font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); font-weight: 500;
+  }
+  .panel header span { text-transform: none; letter-spacing: 0; color: var(--ink-3); font-weight: 400; }
+  .panel header .tag {
+    margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11px;
+    width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--ink); color: var(--panel);
+  }
+  .plot { position: relative; min-height: 0; }
+  .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #powerPlot { display: grid; grid-template-rows: minmax(0, 1fr) 26px; }
+  #powerPlot .plot { position: relative; }
+
+  .decoded { display: grid; grid-template-columns: minmax(0, 1fr) 210px; min-height: 0; }
+  .tape { padding: 6px 14px 12px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 6px; min-height: 0; }
+  .tape .live { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 12px; }
+  .tape .live .sym { color: var(--trace); font-size: 18px; letter-spacing: 0.15em; min-width: 6ch; }
+  .tape .live .sym .cur { opacity: 0.55; }
+  .text {
+    font-size: 24px; line-height: 1.3; letter-spacing: 0.06em; color: var(--ink);
+    overflow: auto; white-space: pre-wrap; word-break: break-all; padding-right: 8px;
+  }
+  .text .caret { display: inline-block; width: 0.55ch; height: 1em; background: var(--trace); vertical-align: -0.15em; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .timing { border-left: 1px solid var(--line); padding: 8px 14px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; align-content: start; font-size: 12px; color: var(--ink-2); }
+  .timing .k { color: var(--ink-3); }
+  .timing .v { color: var(--ink); text-align: right; }
+  .timing .full { grid-column: 1 / -1; }
+  .hist { grid-column: 1 / -1; height: 42px; position: relative; }
+  .hist canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .rail { display: grid; grid-template-rows: auto 1fr auto; background: var(--panel-2); }
+  .rail .block { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .rail .block:last-child { border-bottom: 0; }
+  .rail h4 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; }
+  .meter { display: grid; grid-template-columns: 26px 1fr; gap: 10px; height: 150px; }
+  .meter canvas { width: 100%; height: 100%; display: block; }
+  .meter .scale { position: relative; height: 100%; font-size: 10px; color: var(--ink-3); }
+  .meter .scale span { position: absolute; right: 0; transform: translateY(-50%); }
+  .wave { height: 54px; position: relative; margin-top: 10px; }
+  .wave canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .readouts { display: grid; gap: 10px; }
+  .ro { display: grid; grid-template-columns: 1fr auto; align-items: baseline; }
+  .ro .k { font-size: 12px; color: var(--ink-3); }
+  .ro .v { font-size: 15px; color: var(--ink); }
+  .ro .v small { font-size: 11px; color: var(--ink-3); margin-left: 3px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.05em; border: 1px solid var(--line); color: var(--ink-2); background: var(--panel);
+  }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--off); display: block; }
+  .pill.on { color: var(--on); border-color: var(--on); }
+  .pill.on i { background: var(--on); box-shadow: 0 0 0 3px var(--trace-fill); }
+  /* ---------- encoder ---------- */
+  .encode { border-top: 1px solid var(--line); display: grid; grid-template-rows: auto auto; }
+  .encode header {
+    display: flex; align-items: baseline; gap: 10px; padding: 8px 14px 0;
+    font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); font-weight: 500;
+  }
+  .encode header span { text-transform: none; letter-spacing: 0; color: var(--ink-3); font-weight: 400; }
+  .encode header .tag {
+    margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11px;
+    width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--panel);
+  }
+  .enc-body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
+  .enc-left { padding: 8px 14px 12px; display: grid; gap: 8px; min-width: 0; }
+  .enc-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .enc-row input[type="text"] { flex: 1 1 240px; min-width: 0; text-transform: uppercase; letter-spacing: 0.04em; }
+  .enc-out {
+    font-size: 17px; letter-spacing: 0.12em; line-height: 1.5; color: var(--ink); min-height: 1.5em;
+    white-space: pre-wrap; word-break: break-word; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  }
+  .enc-out .sep { color: var(--ink-3); }
+  .enc-out .lit { color: var(--trace); }
+  .enc-guide { height: 46px; position: relative; }
+  .enc-guide canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .enc-right { border-left: 1px solid var(--line); background: var(--panel-2); padding: 12px 14px; display: grid; gap: 10px; align-content: start; }
+  .enc-right .ro .v { font-size: 15px; }
+
+  .statusbar {
+    display: flex; gap: 18px; padding: 6px 14px; background: var(--chrome); border-top: 1px solid var(--line);
+    color: var(--ink-2); font-size: 12px;
+  }
+  .statusbar .dot { color: var(--good); }
+
+  /* ---------- mock controls ---------- */
+  .sim {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+    padding: 12px 16px; border: 1px dashed var(--line); border-radius: 8px; color: var(--ink-2); font-size: 13px;
+  }
+  .sim .eyebrow { margin-right: 4px; }
+  .sim input[type="range"] { accent-color: var(--trace); width: 160px; }
+  .sim .ctl { background: var(--panel); }
+
+  /* ---------- notes ---------- */
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px 28px; }
+  .note { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+  .note .tag { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--bg); font-size: 11px; font-weight: 600; margin-top: 2px; }
+  .note h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .note p { margin: 2px 0 0; color: var(--ink-2); font-size: 14px; }
+  .decisions { border-top: 1px solid var(--line); padding-top: 14px; }
+  .decisions h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+  .decisions ul { margin: 0; padding-left: 20px; color: var(--ink-2); font-size: 14px; display: grid; gap: 6px; max-width: 78ch; }
+  .decisions li b { color: var(--ink); font-weight: 500; }
+
+  @media (max-width: 900px) {
+    .body { grid-template-columns: 1fr; }
+    .main { border-right: 0; }
+    .decoded { grid-template-columns: 1fr; }
+    .timing { border-left: 0; border-top: 1px solid var(--line); }
+    .intro { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .text .caret { animation: none; }
+  }
+</style>
+
+<div class="page">
+  <div class="intro">
+    <div>
+      <div class="eyebrow">UI design · live mock on simulated audio</div>
+      <h1>Beeper Morse Console</h1>
+      <p>The window below is laid out exactly as the pyqtgraph app will be. The signal is simulated from the numbers measured on your desktop beeper, with hand-keying jitter added, so the plots move the way the real ones will.</p>
+    </div>
+    <div class="facts mono">
+      <div>Beeper<b>2491 Hz</b></div>
+      <div>Tone above floor<b>46 dB</b></div>
+      <div>Block<b>10 ms</b></div>
+      <div>Refresh<b>30 fps</b></div>
+    </div>
+  </div>
+
+  <div class="win" id="win" aria-label="Application window mock">
+    <div class="titlebar">
+      <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="name">Beeper Morse Console</span>
+      <span>—</span>
+      <span class="mono">Microphone Array 1 (WDM-KS) · 48 kHz</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="field">
+        <label for="dev">Input</label>
+        <select id="dev" class="ctl">
+          <option>Microphone Array 1 — WDM-KS (raw)</option>
+          <option>Microphone Array — Intel SST (processed)</option>
+          <option>Microphone — Realtek HD Audio Mic input</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f0">Tone</label>
+        <input id="f0" class="ctl mono" type="number" value="2491" min="200" max="8000" step="1" aria-label="Tone frequency in hertz"> <span class="mono" style="color:var(--ink-3)">Hz</span>
+        <button class="ctl" id="autoBtn" title="Hold a beep for one second">Auto-detect</button>
+      </div>
+      <div class="field">
+        <label>Speed</label>
+        <div class="seg" role="group" aria-label="Speed mode">
+          <button id="wpmAuto" aria-pressed="true">Auto</button>
+          <button id="wpmManual" aria-pressed="false">Manual</button>
+        </div>
+        <input id="wpmVal" class="ctl mono" type="number" value="8" min="3" max="40" disabled aria-label="Words per minute"> <span class="mono" style="color:var(--ink-3)">WPM</span>
+      </div>
+      <div class="spacer"></div>
+      <button class="ctl" id="pauseBtn">Pause</button>
+      <button class="ctl" id="saveBtn" title="Write the last 30 seconds to a WAV file">Save 30 s</button>
+      <button class="ctl primary" id="clearBtn">Clear text</button>
+    </div>
+
+    <div class="body">
+      <div class="main">
+        <section class="panel" aria-label="Spectrum">
+          <header>Spectrum <span>0–8 kHz · 2048-point FFT · 43 ms</span><span class="tag">A</span></header>
+          <div class="plot"><canvas id="specCanvas"></canvas></div>
+        </section>
+
+        <section class="panel" id="powerPlot" aria-label="Tone power">
+          <header>Tone power at <span id="f0Label" class="mono">2491 Hz</span> <span>· last 10 s · threshold with hysteresis</span><span class="tag">B</span></header>
+          <div class="plot"><canvas id="powerCanvas"></canvas></div>
+          <div class="plot"><canvas id="stripCanvas"></canvas></div>
+        </section>
+
+        <section class="panel" aria-label="Decoded text">
+          <header>Decoded <span>· letters appear at each gap, a long gap adds a space</span><span class="tag">C</span></header>
+          <div class="decoded">
+            <div class="tape">
+              <div class="live">
+                <span>Current letter</span>
+                <span class="sym mono" id="symBuf">&nbsp;</span>
+                <span id="symHint" style="color:var(--ink-3)"></span>
+              </div>
+              <div class="text mono" id="textOut"></div>
+            </div>
+            <div class="timing mono">
+              <span class="k">Dit</span><span class="v" id="ditV">— ms</span>
+              <span class="k">Dah</span><span class="v" id="dahV">— ms</span>
+              <span class="k">Letter gap</span><span class="v" id="lgapV">— ms</span>
+              <span class="k">Reverb offset</span><span class="v" id="offV">— ms</span>
+              <span class="k full" style="margin-top:4px">Mark lengths, last 30</span>
+              <div class="hist"><canvas id="histCanvas"></canvas></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="rail" aria-label="Readouts">
+        <div class="block">
+          <h4>Input level</h4>
+          <div class="meter">
+            <div class="scale mono">
+              <span style="top:0%">0</span><span style="top:22%">-20</span><span style="top:44%">-40</span><span style="top:66%">-60</span><span style="top:88%">-80</span>
+            </div>
+            <canvas id="meterCanvas"></canvas>
+          </div>
+          <div class="wave"><canvas id="waveCanvas"></canvas></div>
+          <div class="eyebrow" style="margin-top:6px">Band-passed input · 6 ms</div>
+        </div>
+        <div class="block readouts">
+          <div class="ro"><span class="k">Detector</span><span id="statePill" class="pill"><i></i>OFF</span></div>
+          <div class="ro"><span class="k">Level</span><span class="v mono" id="lvlV">-64<small>dBFS</small></span></div>
+          <div class="ro"><span class="k">Signal / floor</span><span class="v mono" id="snrV">—<small>dB</small></span></div>
+          <div class="ro"><span class="k">Speed</span><span class="v mono" id="wpmV">—<small>WPM</small></span></div>
+          <div class="ro"><span class="k">Letters</span><span class="v mono" id="cntV">0</span></div>
+          <div class="ro"><span class="k">Unknown</span><span class="v mono" id="unkV">0</span></div>
+        </div>
+        <div class="block" style="font-size:12px;color:var(--ink-3)">
+          Threshold and speed adapt on their own. Turn <b style="color:var(--ink-2);font-weight:500">Manual</b> on if the keying is very irregular.
+        </div>
+      </aside>
+    </div>
+
+    <section class="encode" aria-label="Encode a message">
+      <header>Encode <span>· type a message, read it as Morse, follow the keying guide or play it</span><span class="tag">D</span></header>
+      <div class="enc-body">
+        <div class="enc-left">
+          <div class="enc-row">
+            <input id="encIn" class="ctl mono" type="text" value="HELLO WORLD" placeholder="Type a message" aria-label="Message to encode" spellcheck="false">
+            <div class="field"><label for="encWpm">Speed</label><input id="encWpm" class="ctl mono" type="number" value="8" min="3" max="40" step="1" aria-label="Encoding speed in words per minute"> <span class="mono" style="color:var(--ink-3)">WPM</span></div>
+            <button class="ctl" id="encPlay">Play tone</button>
+            <button class="ctl" id="encCopy">Copy</button>
+          </div>
+          <div class="enc-out mono" id="encOut" aria-live="polite"></div>
+          <div class="enc-guide"><canvas id="encCanvas"></canvas></div>
+        </div>
+        <div class="enc-right readouts">
+          <div class="ro"><span class="k">Duration</span><span class="v mono" id="encDur">—<small>s</small></span></div>
+          <div class="ro"><span class="k">Dit · dah</span><span class="v mono" id="encDit">—</span></div>
+          <div class="ro"><span class="k">Letter gap · word gap</span><span class="v mono" id="encGap">—</span></div>
+          <div class="ro"><span class="k">Tone</span><span class="v mono">2491<small>Hz</small></span></div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:2px">Play keys the tone through this machine's speakers, so the decoder above can be tested without the desktop.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="statusbar mono">
+      <span><span class="dot">●</span> Listening</span>
+      <span>480-sample blocks</span>
+      <span id="dropV">0 dropped</span>
+      <span id="clockV">00:00</span>
+    </div>
+  </div>
+
+  <div class="sim" aria-label="Simulation controls">
+    <span class="eyebrow">Simulation</span>
+    <label class="field">Message
+      <select id="simMsg" class="ctl">
+        <option value="HELLO WORLD">HELLO WORLD</option>
+        <option value="SOS SOS">SOS SOS</option>
+        <option value="CQ CQ DE JZ">CQ CQ DE JZ</option>
+        <option value="BEEP 2491 HZ">BEEP 2491 HZ</option>
+      </select>
+    </label>
+    <label class="field">Keying speed <input id="simWpm" type="range" min="4" max="20" value="8"> <span class="mono" id="simWpmV">8 WPM</span></label>
+    <label class="field">Hand jitter <input id="simJit" type="range" min="0" max="40" value="15"> <span class="mono" id="simJitV">±15 %</span></label>
+    <label class="field">Distance <input id="simDist" type="range" min="0" max="30" value="0"> <span class="mono" id="simDistV">−0 dB</span></label>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="tag">A</span><div><h3>Spectrum</h3><p>What the mic hears, 0 to 8 kHz. The amber marker sits on the tone frequency; the faint marker at 3f shows the beeper's third harmonic, which is 11 dB down on your speaker. Auto-detect averages this view for a second and snaps the marker to the strongest peak.</p></div></div>
+    <div class="note"><span class="tag">B</span><div><h3>Tone power and ON/OFF strip</h3><p>Energy at the tone frequency, one point per 10 ms, scrolling over the last 10 seconds. The dashed pair is the hysteresis threshold, drawn from the tracked floor and peak. The strip beneath is the detector's verdict, the tape a Morse operator would read.</p></div></div>
+    <div class="note"><span class="tag">C</span><div><h3>Decoded text and timing</h3><p>The letter being keyed builds up as dots and dashes and is committed at the next letter gap. On the right, the live estimates that drive the decoder: dit, dah, letter gap and the reverb offset, plus a histogram of recent mark lengths that should show two clusters.</p></div></div>
+    <div class="note"><span class="tag">D</span><div><h3>Encode</h3><p>Type English, read the Morse. Letters are separated by a space and words by a slash. The bar underneath is the keying guide: marks and gaps drawn to scale at the chosen speed, with each letter labelled, so you can follow it while pressing the button. Play keys the tone through the speakers and runs a playhead along the guide.</p></div></div>
+    <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
+  </div>
+
+  <div class="decisions">
+    <h2>Decisions to confirm</h2>
+    <ul>
+      <li><b>Spectrum range.</b> 0 to 8 kHz shows the fundamental and third harmonic. The plan said 300 Hz to 5 kHz; this is wider on purpose.</li>
+      <li><b>Speed defaults to Auto.</b> The decoder estimates dit length from your keying. Manual is a fallback for very uneven presses.</li>
+      <li><b>Save 30 s</b> writes the recent audio to a WAV file for test fixtures. Drop it if you never want files written.</li>
+      <li><b>Encoder placement.</b> A full-width strip under the plots, always visible. It could instead live in a second tab if you want the decoder view taller.</li>
+      <li><b>Window size.</b> Designed for about 1100 by 880 pixels with the encoder. Panels stretch with the window.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- Morse table ----------
+  const TABLE = { A:'.-',B:'-...',C:'-.-.',D:'-..',E:'.',F:'..-.',G:'--.',H:'....',I:'..',J:'.---',K:'-.-',L:'.-..',M:'--',N:'-.',O:'---',P:'.--.',Q:'--.-',R:'.-.',S:'...',T:'-',U:'..-',V:'...-',W:'.--',X:'-..-',Y:'-.--',Z:'--..','0':'-----','1':'.----','2':'..---','3':'...--','4':'....-','5':'.....','6':'-....','7':'--...','8':'---..','9':'----.' };
+  const INV = Object.fromEntries(Object.entries(TABLE).map(([k, v]) => [v, k]));
+
+  // ---------- simulation of the keyed beeper ----------
+  const sim = {
+    msg: 'HELLO WORLD', wpm: 8, jitter: 0.15, atten: 0,
+    events: [], evIdx: 0, evLeft: 0, on: false, paused: false,
+    envLin: 0, floorDb: -36, peakDb: 10, // Goertzel units measured on the real beeper
+    lvlDb: -64, peakHold: -64, peakHoldAge: 0, blocks: 0, phase: 0,
+    specPersist: null,
+  };
+  const F0 = 2491;
+  const rnd = (a) => 1 + (Math.random() * 2 - 1) * a;
+  function buildEvents() {
+    const T = 1200 / sim.wpm;
+    const ev = [{ on: false, ms: 1500 }];
+    for (const ch of sim.msg) {
+      if (ch === ' ') { ev[ev.length - 1].ms += 4 * T; continue; }
+      const code = TABLE[ch]; if (!code) continue;
+      for (const s of code) {
+        ev.push({ on: true, ms: (s === '.' ? T : 3 * T) * rnd(sim.jitter) });
+        ev.push({ on: false, ms: T * rnd(sim.jitter) });
+      }
+      ev[ev.length - 1].ms += 2 * T * rnd(sim.jitter);
+    }
+    ev[ev.length - 1].ms += 3000;
+    sim.events = ev; sim.evIdx = 0; sim.evLeft = ev[0].ms;
+  }
+
+  // ---------- detector + decoder (mirrors the plan) ----------
+  const det = { state: false, hi: 0, lo: 0, floor: -36, peak: 10, runs: [], consumed: 0 };
+  const dec = { marks: [], gaps: [], T: 150, d: 0, buf: '', text: 'SOS SOS ', letters: 0, unknown: 0, offBlocks: 0 };
+  const hist = { power: new Float32Array(1000).fill(-36), on: new Uint8Array(1000), thrHi: new Float32Array(1000), thrLo: new Float32Array(1000), idx: 0 };
+  const pct = (arr, p) => { if (!arr.length) return NaN; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+
+  function detectorStep(pdb) {
+    // floor: fast down, slow up; peak: fast up, slow down
+    det.floor = pdb < det.floor ? pdb : det.floor + 0.02;
+    det.peak = pdb > det.peak ? pdb : det.peak - 0.02;
+    if (det.peak - det.floor < 12) det.peak = det.floor + 12;
+    det.hi = det.floor + 0.6 * (det.peak - det.floor);
+    det.lo = det.floor + 0.4 * (det.peak - det.floor);
+    const was = det.state;
+    if (det.state && pdb < det.lo) det.state = false;
+    else if (!det.state && pdb > det.hi) det.state = true;
+    if (det.runs.length === 0 || det.state !== was) det.runs.push({ on: det.state, n: 0 });
+    det.runs[det.runs.length - 1].n++;
+    // debounce: absorb a completed run shorter than 2 blocks into its neighbours
+    for (let i = 1; i < det.runs.length - 1; i++) {
+      if (det.runs[i].n < 2) {
+        det.runs[i - 1].n += det.runs[i].n + det.runs[i + 1].n;
+        det.runs.splice(i, 2);
+        if (det.consumed > i - 1) det.consumed = i - 1;
+        i = Math.max(0, i - 2);
+      }
+    }
+    while (det.consumed < det.runs.length - 3) decodeRun(det.runs[det.consumed++]);
+    // idle flush
+    const last = det.runs[det.runs.length - 1];
+    if (!last.on && dec.buf && last.n * 10 + dec.d > 7 * dec.T) commit(true);
+    if (det.runs.length > 400) { det.runs.splice(0, 100); det.consumed -= 100; }
+  }
+  function updateTiming() {
+    if (dec.marks.length < 2 || dec.gaps.length < 1) return;
+    const M = pct(dec.marks, 0.1);
+    const G = pct(dec.gaps.map((g) => Math.min(g, 20 * M)), 0.1);
+    let T = (M + G) / 2, d = (M - G) / 2;
+    if (d < 0) { T = M; d = 0; }
+    dec.T = Math.max(30, T); dec.d = d;
+  }
+  function commit(addSpace) {
+    if (dec.buf) {
+      const ch = INV[dec.buf];
+      dec.text += ch || '?'; dec.letters++; if (!ch) dec.unknown++;
+      dec.buf = '';
+    }
+    if (addSpace && !dec.text.endsWith(' ')) dec.text += ' ';
+    if (dec.text.length > 400) dec.text = dec.text.slice(-300);
+  }
+  function decodeRun(run) {
+    const raw = run.n * 10;
+    if (run.on) {
+      dec.marks.push(raw); if (dec.marks.length > 30) dec.marks.shift();
+      updateTiming();
+      dec.buf += (raw - dec.d) < 2 * dec.T ? '.' : '-';
+    } else {
+      dec.gaps.push(raw); if (dec.gaps.length > 30) dec.gaps.shift();
+      updateTiming();
+      const ms = raw + dec.d;
+      if (ms >= 5 * dec.T) commit(true);
+      else if (ms >= 2 * dec.T) commit(false);
+    }
+  }
+
+  // one 10 ms block of the world
+  function step() {
+    // keying
+    sim.evLeft -= 10;
+    while (sim.evLeft <= 0) {
+      sim.evIdx++;
+      if (sim.evIdx >= sim.events.length) buildEvents();
+      sim.evLeft += sim.events[sim.evIdx].ms;
+    }
+    sim.on = sim.events[sim.evIdx].on;
+    // envelope in linear Goertzel units: instant attack, 15 dB first-block drop then a room tail
+    const peakLin = Math.pow(10, (sim.peakDb - sim.atten) / 10) * rnd(0.08);
+    const floorLin = Math.pow(10, sim.floorDb / 10) * rnd(0.6);
+    sim.envLin = sim.on ? peakLin : Math.max(sim.envLin * 0.18, floorLin);
+    const pdb = 10 * Math.log10(sim.envLin + floorLin);
+    detectorStep(pdb);
+    // input level in dBFS: -41 on, -64 off (measured), follows the envelope
+    const target = sim.on ? -41 - sim.atten : -64;
+    sim.lvlDb += (target - sim.lvlDb) * (sim.on ? 0.8 : 0.35);
+    sim.lvlDb += (Math.random() - 0.5) * 0.6;
+    if (sim.lvlDb > sim.peakHold) { sim.peakHold = sim.lvlDb; sim.peakHoldAge = 0; } else if (++sim.peakHoldAge > 150) sim.peakHold -= 0.3;
+    // history ring
+    hist.power[hist.idx] = pdb; hist.on[hist.idx] = det.state ? 1 : 0; hist.thrHi[hist.idx] = det.hi; hist.thrLo[hist.idx] = det.lo;
+    hist.idx = (hist.idx + 1) % hist.power.length;
+    sim.blocks++;
+  }
+
+  // ---------- canvases ----------
+  const canvases = {};
+  function setup(id) {
+    const c = $(id); const ctx = c.getContext('2d');
+    canvases[id] = { c, ctx, w: 0, h: 0 };
+    return canvases[id];
+  }
+  function fit(cv) {
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const w = cv.c.clientWidth, h = cv.c.clientHeight;
+    if (cv.w !== w || cv.h !== h) {
+      cv.w = w; cv.h = h; cv.c.width = Math.round(w * dpr); cv.c.height = Math.round(h * dpr);
+    }
+    cv.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return cv;
+  }
+  ['specCanvas', 'powerCanvas', 'stripCanvas', 'meterCanvas', 'waveCanvas', 'histCanvas'].forEach(setup);
+  const font = (px, mono) => `${px}px ${mono ? '"IBM Plex Mono", Consolas, monospace' : '"IBM Plex Sans", system-ui, sans-serif'}`;
+
+  let hoverX = null;
+  $('powerCanvas').addEventListener('mousemove', (e) => { hoverX = e.offsetX; });
+  $('powerCanvas').addEventListener('mouseleave', () => { hoverX = null; });
+
+  function drawSpectrum() {
+    const cv = fit(canvases.specCanvas); const { ctx, w, h } = cv;
+    const th = { grid: cssVar('--grid'), ink2: cssVar('--ink-2'), ink3: cssVar('--ink-3'), spec: cssVar('--spec'), fill: cssVar('--spec-fill'), trace: cssVar('--trace') };
+    const padL = 40, padR = 12, padT = 10, padB = 22;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    const N = 256, fmax = 8000; const dbMin = -110, dbMax = -30;
+    if (!sim.specPersist) sim.specPersist = new Float32Array(N).fill(-100);
+    const f0 = F0;
+    const lvl = 10 * Math.log10(sim.envLin + 1e-9) - 10 - 45; // peak of tone ~ -45 dB in this scale when on
+    const spec = sim.specPersist;
+    for (let i = 0; i < N; i++) {
+      const f = (i + 0.5) * fmax / N;
+      let v = -100 + 6 * (f / fmax) + (Math.random() - 0.5) * 5;
+      const peakAt = (fc, rel) => { const dx = (f - fc) / 45; v = Math.max(v, lvl + rel - dx * dx * 10); };
+      peakAt(f0, 0); peakAt(2 * f0, -31); peakAt(3 * f0, -11);
+      spec[i] = spec[i] * 0.55 + v * 0.45;
+    }
+    ctx.clearRect(0, 0, w, h);
+    const x = (f) => padL + f / fmax * pw, y = (db) => padT + (dbMax - db) / (dbMax - dbMin) * ph;
+    ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.font = font(10, true); ctx.fillStyle = th.ink3; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let db = -30; db >= -110; db -= 20) { ctx.beginPath(); ctx.moveTo(padL, y(db) + 0.5); ctx.lineTo(w - padR, y(db) + 0.5); ctx.stroke(); ctx.fillText(db, padL - 6, y(db)); }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let f = 0; f <= 8000; f += 1000) { ctx.beginPath(); ctx.moveTo(x(f) + 0.5, padT); ctx.lineTo(x(f) + 0.5, padT + ph); ctx.stroke(); ctx.fillText(f >= 1000 ? (f / 1000) + 'k' : '0', x(f), padT + ph + 6); }
+    // area + line
+    ctx.beginPath(); ctx.moveTo(x(0), y(dbMin));
+    for (let i = 0; i < N; i++) ctx.lineTo(x((i + 0.5) * fmax / N), y(Math.max(dbMin, spec[i])));
+    ctx.lineTo(x(fmax), y(dbMin)); ctx.closePath(); ctx.fillStyle = th.fill; ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) { const px = x((i + 0.5) * fmax / N), py = y(Math.max(dbMin, spec[i])); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    ctx.strokeStyle = th.spec; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.stroke();
+    // markers
+    const mark = (f, label, strong) => {
+      ctx.save(); ctx.setLineDash(strong ? [] : [3, 4]); ctx.strokeStyle = th.trace; ctx.globalAlpha = strong ? 1 : 0.55; ctx.lineWidth = strong ? 1.5 : 1;
+      ctx.beginPath(); ctx.moveTo(x(f) + 0.5, padT); ctx.lineTo(x(f) + 0.5, padT + ph); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = th.trace; ctx.font = font(11, true); ctx.textAlign = f > 7000 ? 'right' : 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(label, x(f) + (f > 7000 ? -5 : 5), padT + 2); ctx.restore();
+    };
+    mark(f0, `${f0} Hz`, true); mark(3 * f0, '3f', false);
+  }
+
+  function drawPower() {
+    const cv = fit(canvases.powerCanvas); const { ctx, w, h } = cv;
+    const th = { grid: cssVar('--grid'), ink2: cssVar('--ink-2'), ink3: cssVar('--ink-3'), trace: cssVar('--trace'), fill: cssVar('--trace-fill'), thr: cssVar('--thr'), ink: cssVar('--ink') };
+    const padL = 40, padR = 12, padT = 8, padB = 4;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    const dbMin = -50, dbMax = 20, N = hist.power.length;
+    const y = (db) => padT + (dbMax - Math.max(dbMin, Math.min(dbMax, db))) / (dbMax - dbMin) * ph;
+    const x = (i) => padL + i / (N - 1) * pw;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.font = font(10, true); ctx.fillStyle = th.ink3; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let db = 20; db >= -50; db -= 10) { ctx.beginPath(); ctx.moveTo(padL, y(db) + 0.5); ctx.lineTo(w - padR, y(db) + 0.5); ctx.stroke(); if (db % 20 === 0) ctx.fillText(db, padL - 6, y(db)); }
+    for (let s = 0; s <= 10; s += 2) { const px = padL + (1 - s / 10) * pw; ctx.beginPath(); ctx.moveTo(px + 0.5, padT); ctx.lineTo(px + 0.5, padT + ph); ctx.stroke(); }
+    const at = (arr, i) => arr[(hist.idx + i) % N];
+    // threshold band
+    ctx.beginPath();
+    for (let i = 0; i < N; i += 4) ctx.lineTo(x(i), y(at(hist.thrHi, i)));
+    for (let i = N - 1; i >= 0; i -= 4) ctx.lineTo(x(i), y(at(hist.thrLo, i)));
+    ctx.closePath(); ctx.fillStyle = th.thr; ctx.globalAlpha = 0.10; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = th.thr; ctx.lineWidth = 1;
+    for (const arr of [hist.thrHi, hist.thrLo]) { ctx.beginPath(); for (let i = 0; i < N; i += 4) { const px = x(i), py = y(at(arr, i)); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke(); }
+    ctx.restore();
+    // trace area + line
+    ctx.beginPath(); ctx.moveTo(x(0), y(dbMin));
+    for (let i = 0; i < N; i++) ctx.lineTo(x(i), y(at(hist.power, i)));
+    ctx.lineTo(x(N - 1), y(dbMin)); ctx.closePath(); ctx.fillStyle = th.fill; ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) { const px = x(i), py = y(at(hist.power, i)); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    ctx.strokeStyle = th.trace; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.stroke();
+    // endpoint
+    const lastDb = at(hist.power, N - 1);
+    ctx.beginPath(); ctx.arc(x(N - 1), y(lastDb), 3, 0, Math.PI * 2); ctx.fillStyle = th.trace; ctx.fill();
+    // labels
+    ctx.fillStyle = th.ink3; ctx.font = font(10, true); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('−10 s', padL + 2, padT + 2); ctx.textAlign = 'right'; ctx.fillText('now', w - padR - 2, padT + 2);
+    ctx.fillStyle = th.thr; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText('threshold', padL + 4, y(at(hist.thrHi, 0)) - 3);
+    // hover crosshair
+    if (hoverX !== null && hoverX >= padL && hoverX <= w - padR) {
+      const i = Math.round((hoverX - padL) / pw * (N - 1));
+      const v = at(hist.power, i); const ago = ((N - 1 - i) / 100).toFixed(2);
+      ctx.save(); ctx.strokeStyle = th.ink2; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+      ctx.beginPath(); ctx.moveTo(x(i) + 0.5, padT); ctx.lineTo(x(i) + 0.5, padT + ph); ctx.stroke(); ctx.restore();
+      ctx.beginPath(); ctx.arc(x(i), y(v), 4, 0, Math.PI * 2); ctx.fillStyle = th.trace; ctx.fill(); ctx.strokeStyle = cssVar('--panel'); ctx.lineWidth = 2; ctx.stroke();
+      const label = `${v.toFixed(1)} dB · ${ago} s ago${at(hist.on, i) ? ' · ON' : ''}`;
+      ctx.font = font(11, true); const tw = ctx.measureText(label).width + 12;
+      let bx = x(i) + 8; if (bx + tw > w - padR) bx = x(i) - 8 - tw;
+      const by = Math.max(padT, Math.min(padT + ph - 22, y(v) - 26));
+      ctx.fillStyle = th.ink; ctx.beginPath(); ctx.roundRect(bx, by, tw, 20, 4); ctx.fill();
+      ctx.fillStyle = cssVar('--panel'); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(label, bx + 6, by + 10);
+    }
+  }
+
+  function drawStrip() {
+    const cv = fit(canvases.stripCanvas); const { ctx, w, h } = cv;
+    const on = cssVar('--on'), off = cssVar('--off'), ink3 = cssVar('--ink-3');
+    const padL = 40, padR = 12, pw = w - padL - padR, N = hist.on.length;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = off; ctx.fillRect(padL, 6, pw, h - 12);
+    ctx.fillStyle = on;
+    let i = 0;
+    while (i < N) {
+      const v = hist.on[(hist.idx + i) % N];
+      if (!v) { i++; continue; }
+      let j = i; while (j < N && hist.on[(hist.idx + j) % N]) j++;
+      ctx.fillRect(padL + i / N * pw, 6, Math.max(1, (j - i) / N * pw), h - 12);
+      i = j;
+    }
+    ctx.fillStyle = ink3; ctx.font = font(10, false); ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText('ON', padL - 6, h / 2);
+  }
+
+  function drawMeter() {
+    const cv = fit(canvases.meterCanvas); const { ctx, w, h } = cv;
+    const grid = cssVar('--grid'), trace = cssVar('--trace'), ink = cssVar('--ink'), ink3 = cssVar('--ink-3');
+    ctx.clearRect(0, 0, w, h);
+    const y = (db) => (0 - db) / 90 * h;
+    ctx.fillStyle = grid; ctx.fillRect(0, 0, w, h);
+    const lvl = Math.max(-90, Math.min(0, sim.lvlDb));
+    ctx.fillStyle = trace; ctx.fillRect(0, y(lvl), w, h - y(lvl));
+    ctx.fillStyle = ink; ctx.fillRect(0, y(Math.max(-90, sim.peakHold)) - 1, w, 2);
+    for (let db = -20; db > -90; db -= 20) { ctx.fillStyle = ink3; ctx.globalAlpha = 0.5; ctx.fillRect(0, y(db), w, 1); ctx.globalAlpha = 1; }
+  }
+
+  function drawWave() {
+    const cv = fit(canvases.waveCanvas); const { ctx, w, h } = cv;
+    const spec = cssVar('--spec'), grid = cssVar('--grid');
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = grid; ctx.beginPath(); ctx.moveTo(0, h / 2 + 0.5); ctx.lineTo(w, h / 2 + 0.5); ctx.stroke();
+    const amp = Math.min(1, Math.pow(10, (sim.lvlDb + 41) / 20)) * (h / 2 - 3);
+    sim.phase += 0.9;
+    ctx.beginPath();
+    for (let px = 0; px <= w; px++) {
+      const t = px / w * 0.006; // 6 ms window
+      const v = Math.sin(2 * Math.PI * F0 * t + sim.phase) * amp + (Math.random() - 0.5) * 1.5;
+      px ? ctx.lineTo(px, h / 2 - v) : ctx.moveTo(px, h / 2 - v);
+    }
+    ctx.strokeStyle = spec; ctx.lineWidth = 1.25; ctx.stroke();
+  }
+
+  function drawHist() {
+    const cv = fit(canvases.histCanvas); const { ctx, w, h } = cv;
+    const trace = cssVar('--trace'), grid = cssVar('--grid'), ink3 = cssVar('--ink-3');
+    ctx.clearRect(0, 0, w, h);
+    const bins = 16, maxMs = Math.max(600, dec.T * 5);
+    const counts = new Array(bins).fill(0);
+    for (const m of dec.marks) counts[Math.min(bins - 1, Math.floor(m / maxMs * bins))]++;
+    const mx = Math.max(1, ...counts); const bw = w / bins;
+    ctx.fillStyle = grid; ctx.fillRect(0, h - 1, w, 1);
+    for (let i = 0; i < bins; i++) {
+      const bh = counts[i] / mx * (h - 12);
+      if (counts[i]) { ctx.fillStyle = trace; ctx.beginPath(); ctx.roundRect(i * bw + 1, h - 1 - bh, bw - 2, bh, [2, 2, 0, 0]); ctx.fill(); }
+    }
+    ctx.fillStyle = ink3; ctx.font = font(9, true); ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('0', 0, 0); ctx.textAlign = 'right'; ctx.fillText(`${Math.round(maxMs)} ms`, w, 0);
+  }
+
+  // ---------- DOM readouts ----------
+  const el = { sym: $('symBuf'), hint: $('symHint'), text: $('textOut'), dit: $('ditV'), dah: $('dahV'), lgap: $('lgapV'), off: $('offV'), pill: $('statePill'), lvl: $('lvlV'), snr: $('snrV'), wpm: $('wpmV'), cnt: $('cntV'), unk: $('unkV'), clock: $('clockV') };
+  function updateDom() {
+    const last = det.runs[det.runs.length - 1];
+    const live = last && last.on ? ((last.n * 10 - dec.d) < 2 * dec.T ? '·' : '−') : '';
+    const shown = dec.buf.replace(/\./g, '·').replace(/-/g, '−');
+    el.sym.innerHTML = (shown + (live ? `<span class="cur">${live}</span>` : '')) || '&nbsp;';
+    el.hint.textContent = dec.buf && INV[dec.buf] ? `→ ${INV[dec.buf]}` : (dec.buf ? '→ ?' : '');
+    el.text.innerHTML = dec.text.replace(/</g, '&lt;') + '<span class="caret"></span>';
+    el.text.scrollTop = el.text.scrollHeight;
+    const have = dec.marks.length >= 2;
+    el.dit.textContent = have ? `${Math.round(dec.T)} ms` : '— ms';
+    el.dah.textContent = have ? `${Math.round(dec.T * 3)} ms` : '— ms';
+    el.lgap.textContent = have ? `${Math.round(dec.T * 3)} ms` : '— ms';
+    el.off.textContent = have ? `${Math.round(dec.d)} ms` : '— ms';
+    el.pill.className = 'pill' + (det.state ? ' on' : ''); el.pill.innerHTML = `<i></i>${det.state ? 'ON' : 'OFF'}`;
+    el.lvl.innerHTML = `${sim.lvlDb.toFixed(0)}<small>dBFS</small>`;
+    el.snr.innerHTML = `${(det.peak - det.floor).toFixed(0)}<small>dB</small>`;
+    el.wpm.innerHTML = `${have ? (1200 / dec.T).toFixed(1) : '—'}<small>WPM</small>`;
+    el.cnt.textContent = dec.letters; el.unk.textContent = dec.unknown;
+    const s = Math.floor(sim.blocks / 100); el.clock.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  // ---------- controls ----------
+  $('simMsg').addEventListener('change', (e) => { sim.msg = e.target.value; buildEvents(); });
+  $('simWpm').addEventListener('input', (e) => { sim.wpm = +e.target.value; $('simWpmV').textContent = `${sim.wpm} WPM`; });
+  $('simJit').addEventListener('input', (e) => { sim.jitter = +e.target.value / 100; $('simJitV').textContent = `±${e.target.value} %`; });
+  $('simDist').addEventListener('input', (e) => { sim.atten = +e.target.value; $('simDistV').textContent = `−${e.target.value} dB`; });
+  $('clearBtn').addEventListener('click', () => { dec.text = ''; dec.buf = ''; dec.letters = 0; dec.unknown = 0; updateDom(); });
+  $('pauseBtn').addEventListener('click', (e) => { sim.paused = !sim.paused; e.target.textContent = sim.paused ? 'Resume' : 'Pause'; });
+  $('saveBtn').addEventListener('click', (e) => { const t = e.target; t.textContent = 'Saved capture_001.wav'; setTimeout(() => { t.textContent = 'Save 30 s'; }, 1800); });
+  $('autoBtn').addEventListener('click', (e) => { const t = e.target; t.textContent = 'Listening…'; t.disabled = true; setTimeout(() => { $('f0').value = F0; $('f0Label').textContent = `${F0} Hz`; t.textContent = 'Auto-detect'; t.disabled = false; }, 1000); });
+  $('f0').addEventListener('input', (e) => { $('f0Label').textContent = `${e.target.value} Hz`; });
+  const setMode = (manual) => { $('wpmAuto').setAttribute('aria-pressed', String(!manual)); $('wpmManual').setAttribute('aria-pressed', String(manual)); $('wpmVal').disabled = !manual; };
+  $('wpmAuto').addEventListener('click', () => setMode(false)); $('wpmManual').addEventListener('click', () => setMode(true));
+
+  // ---------- encoder ----------
+  const enc = { text: 'HELLO WORLD', wpm: 8, timing: [], letters: [], total: 0, plain: '', playing: false, playStart: 0, ac: null, osc: null };
+  setup('encCanvas');
+  function buildEncoding() {
+    const T = 1200 / enc.wpm;
+    const words = enc.text.toUpperCase().split(/\s+/).filter(Boolean);
+    const timing = [], letters = [], parts = [];
+    let t = 0;
+    words.forEach((w, wi) => {
+      const codes = [];
+      [...w].forEach((ch, ci) => {
+        const code = TABLE[ch];
+        if (!code) { codes.push('?'); return; }
+        codes.push(code);
+        const start = t;
+        [...code].forEach((s, si) => {
+          const ms = s === '.' ? T : 3 * T; timing.push({ on: true, ms }); t += ms;
+          if (si < code.length - 1) { timing.push({ on: false, ms: T }); t += T; }
+        });
+        letters.push({ ch, start, end: t });
+        if (ci < w.length - 1) { timing.push({ on: false, ms: 3 * T }); t += 3 * T; }
+      });
+      parts.push(codes.join(' '));
+      if (wi < words.length - 1) { timing.push({ on: false, ms: 7 * T }); t += 7 * T; }
+    });
+    enc.timing = timing; enc.letters = letters; enc.total = t; enc.plain = parts.join(' / ');
+    $('encOut').innerHTML = parts.length ? parts.map((p) => p.replace(/</g, '&lt;')).join(' <span class="sep">/</span> ') : '<span class="sep">Type a message above</span>';
+    $('encDur').innerHTML = `${(t / 1000).toFixed(1)}<small>s</small>`;
+    $('encDit').textContent = `${Math.round(T)} · ${Math.round(3 * T)} ms`;
+    $('encGap').textContent = `${Math.round(3 * T)} · ${Math.round(7 * T)} ms`;
+  }
+  function drawEncGuide() {
+    const cv = fit(canvases.encCanvas); const { ctx, w, h } = cv;
+    const on = cssVar('--on'), off = cssVar('--off'), ink2 = cssVar('--ink-2'), ink = cssVar('--ink');
+    ctx.clearRect(0, 0, w, h);
+    if (!enc.total) return;
+    const top = 16, bh = h - top - 6, x = (ms) => ms / enc.total * w;
+    ctx.fillStyle = off; ctx.fillRect(0, top, w, bh);
+    let t = 0; ctx.fillStyle = on;
+    for (const seg of enc.timing) { if (seg.on) ctx.fillRect(x(t), top, Math.max(1, x(seg.ms) - 1), bh); t += seg.ms; }
+    ctx.fillStyle = ink2; ctx.font = font(11, true); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    const minW = 9;
+    for (const L of enc.letters) { if (x(L.end) - x(L.start) >= minW) ctx.fillText(L.ch, x((L.start + L.end) / 2), 0); }
+    if (enc.playing) {
+      const elapsed = performance.now() - enc.playStart;
+      if (elapsed >= enc.total + 50) stopPlay();
+      else if (elapsed >= 0) { ctx.fillStyle = ink; ctx.fillRect(x(elapsed) - 1, top - 4, 2, bh + 8); }
+    }
+  }
+  function startPlay() {
+    if (enc.playing || !enc.total) return;
+    try {
+      enc.ac = enc.ac || new (window.AudioContext || window.webkitAudioContext)();
+      const ac = enc.ac; if (ac.state === 'suspended') ac.resume();
+      const osc = ac.createOscillator(); osc.type = 'sine'; osc.frequency.value = F0;
+      const gain = ac.createGain(); gain.gain.setValueAtTime(0, ac.currentTime);
+      osc.connect(gain).connect(ac.destination);
+      const t0 = ac.currentTime + 0.08; let t = t0;
+      for (const seg of enc.timing) {
+        const d = seg.ms / 1000;
+        if (seg.on) { gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(0.15, t + 0.003); gain.gain.setValueAtTime(0.15, t + d - 0.003); gain.gain.linearRampToValueAtTime(0, t + d); }
+        t += d;
+      }
+      osc.start(t0); osc.stop(t + 0.1); enc.osc = osc;
+      enc.playing = true; enc.playStart = performance.now() + 80;
+      $('encPlay').textContent = 'Stop';
+    } catch (e) { $('encPlay').textContent = 'Audio unavailable'; }
+  }
+  function stopPlay() {
+    if (enc.osc) { try { enc.osc.stop(); } catch (e) { /* already stopped */ } enc.osc = null; }
+    enc.playing = false; $('encPlay').textContent = 'Play tone';
+  }
+  $('encIn').addEventListener('input', (e) => { enc.text = e.target.value; stopPlay(); buildEncoding(); drawEncGuide(); });
+  $('encWpm').addEventListener('input', (e) => { enc.wpm = Math.max(3, Math.min(40, +e.target.value || 8)); stopPlay(); buildEncoding(); drawEncGuide(); });
+  $('encPlay').addEventListener('click', () => { enc.playing ? stopPlay() : startPlay(); });
+  $('encCopy').addEventListener('click', (e) => {
+    const t = e.target; const done = () => { t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(enc.plain).then(done, done); else done();
+  });
+  buildEncoding();
+
+  // ---------- run ----------
+  buildEvents();
+  for (let i = 0; i < 1000; i++) step();   // arrive with 10 s of history on screen
+  function drawAll() { drawSpectrum(); drawPower(); drawStrip(); drawMeter(); drawWave(); drawHist(); drawEncGuide(); updateDom(); }
+  drawAll();
+  if (!reduceMotion) {
+    let last = performance.now(), acc = 0;
+    const frame = (now) => {
+      acc += Math.min(200, now - last); last = now;
+      if (!sim.paused) { while (acc >= 10) { step(); acc -= 10; } } else acc = 0;
+      drawAll();
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }
+  new ResizeObserver(drawAll).observe($('win'));
+})();
+</script>
