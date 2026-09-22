@@ -198,13 +198,129 @@ def test_jitter_20_percent_12wpm_still_decodes(text: str, seed: int):
 
 
 def test_digits_and_punctuation_decode():
-    # 'C' opens with a dah: before two marks have arrived only the seed (or the
-    # 150 ms fallback) is available, so a message that starts with a dah needs
-    # a WPM seed to classify its very first mark.
+    # 'C' opens with a dah. The first runs are held back until both mark
+    # classes have been seen, so no WPM seed is needed any more (it still works).
     emitted, _ = decode_runs(make_runs("CQ DE W1AW 73 K.", 15, jitter=0.1, seed=3), wpm=15)
+    assert emitted.strip() == "CQ DE W1AW 73 K."
+    emitted, _ = decode_runs(make_runs("CQ DE W1AW 73 K.", 15, jitter=0.1, seed=3))
     assert emitted.strip() == "CQ DE W1AW 73 K."
     emitted, _ = decode_runs(make_runs("ITS 73 DE W1AW K.", 15, jitter=0.1, seed=3))
     assert emitted.strip() == "ITS 73 DE W1AW K."
+
+
+# ------------------------------------------------------- hold-back and dah rule
+
+
+@pytest.mark.parametrize("text", ["OSO", "TEST", "MOM", "MORSE CODE", "OK", "0 TO 9", "TTT EEE"])
+@pytest.mark.parametrize("wpm", [8, 15, 25])
+def test_messages_opening_with_dah_letters_decode_without_a_seed(text: str, wpm: int):
+    emitted, dec = decode_runs(make_runs(text, wpm))
+    assert emitted.strip() == text
+    assert dec.dit_ms == pytest.approx(1200 / wpm, rel=0.06)
+
+
+@pytest.mark.parametrize("wpm", [2, 3, 4, 5, 6, 7])
+@pytest.mark.parametrize("text", ["SOS HELLO", "HELLO WORLD", "TEST 123"])
+def test_slow_keying_down_to_2_wpm(text: str, wpm: int):
+    emitted, dec = decode_runs(make_runs(text, wpm))
+    assert emitted.strip() == text
+    assert dec.dit_ms == pytest.approx(1200 / wpm, rel=0.06)
+
+
+def test_runs_are_held_back_until_the_estimate_is_trusted():
+    dec = MorseDecoder()
+    runs = make_runs("SOS", 3)  # 400 ms dits: the old seed read the first one as a dah
+    assert dec.timing_ready is False
+    # S: three marks of one class plus two gaps. Not trusted yet, nothing emitted.
+    out = "".join(dec.feed(r) for r in runs[:6])
+    assert out == "" and dec.buffer == "" and dec.timing_ready is False
+    assert dec.pending_count == 6
+    # The first dah of O makes both classes visible: everything replays at once.
+    out = dec.feed(runs[6])
+    assert dec.timing_ready is True and dec.pending_count == 0
+    assert out == "S" and dec.buffer == "-"
+    assert dec.dit_ms == pytest.approx(400.0)
+
+
+def test_five_marks_of_one_class_are_enough_to_trust():
+    dec = MorseDecoder()
+    out = "".join(dec.feed(r) for r in make_runs("EIS", 10))  # dits only: E I S
+    assert dec.timing_ready is True  # trusted at the 5th mark
+    out += dec.idle(1_000_000)
+    assert out.strip() == "EIS"
+
+
+def test_idle_flushes_held_runs_with_the_best_estimate():
+    # A lone mark: the seed decides (below 300 ms is E, else T).
+    emitted, _ = decode_runs(make_runs("E", 15))
+    assert emitted == "E "
+    emitted, _ = decode_runs(make_runs("T", 8))
+    assert emitted == "T "
+    # One dit-only letter: dit rule.
+    emitted, _ = decode_runs(make_runs("S", 3))
+    assert emitted == "S "
+    # One dah-only letter: marks are 3x the intra gaps, the dah rule applies.
+    emitted, dec = decode_runs(make_runs("O", 15))
+    assert emitted == "O "
+    assert dec.dit_ms == pytest.approx(80.0)
+
+
+def test_held_runs_wait_for_a_slow_letter_gap_before_flushing():
+    # E (600 ms) then a letter gap (1800 ms) then E at 2 WPM. The old rule
+    # flushed after 7 x 150 = 1050 ms of silence and called the dit a dah.
+    dec = MorseDecoder()
+    e_mark, gap, e_mark2 = make_runs("EE", 2)
+    assert dec.feed(e_mark) == ""
+    assert dec.idle(1700.0) == ""  # limit is max(7 x 150, 3.5 x 600) = 2100 ms
+    assert dec.feed(gap) == ""
+    out = dec.feed(e_mark2)
+    assert dec.timing_ready is False  # two equal marks: still one class
+    out += dec.idle(1_000_000)
+    assert out == "EE "
+
+
+def test_overlong_mark_clears_held_runs_too():
+    dec = MorseDecoder()
+    for r in make_runs("S", 3):
+        dec.feed(r)
+    assert dec.pending_count > 0
+    assert dec.feed(Run(True, 600)) == ""  # 6 s: not a symbol
+    assert dec.pending_count == 0 and dec.buffer == ""
+    assert dec.unknown_count == 0
+
+
+def test_adopt_timing_transfers_speed_and_offset():
+    _, source = decode_runs(make_runs("PARIS PARIS", 15, offset_ms=30))
+    fresh = MorseDecoder()
+    assert fresh.timing_ready is False
+    fresh.adopt_timing(source)
+    assert fresh.timing_ready is True
+    assert fresh.dit_ms == pytest.approx(source.dit_ms)
+    assert fresh.offset_ms == pytest.approx(source.offset_ms)
+    assert fresh.text == "" and fresh.buffer == ""
+    # A fixed-speed decoder keeps its seed but takes the measured offset.
+    manual = MorseDecoder(wpm=10, adaptive=False)
+    manual.adopt_timing(source)
+    assert manual.dit_ms == pytest.approx(120.0)
+    assert manual.offset_ms == pytest.approx(source.offset_ms)
+    # The adopted history means the next letter decodes without a hold-back.
+    out = "".join(fresh.feed(r) for r in make_runs("SOS", 15, offset_ms=30))
+    out += fresh.idle(1_000_000)
+    assert out.strip() == "SOS"
+
+
+def test_reset_clears_held_runs_and_trust():
+    dec = MorseDecoder()
+    for r in make_runs("SO", 15):
+        dec.feed(r)
+    assert dec.timing_ready is True
+    dec.reset()
+    assert dec.timing_ready is False and dec.pending_count == 0
+    dec2 = MorseDecoder()
+    for r in make_runs("SO", 15):
+        dec2.feed(r)
+    dec2.reset(keep_timing=True)
+    assert dec2.timing_ready is True and dec2.dit_ms == pytest.approx(80.0)
 
 
 # ------------------------------------------------- parity vectors (web port)
@@ -514,7 +630,7 @@ def test_leading_gap_emits_nothing_and_is_ignored_for_timing():
 def test_word_gap_adds_exactly_one_space():
     emitted, _ = decode_runs(make_runs("SOS SOS", 15))
     assert emitted == "SOS SOS "
-    dec = MorseDecoder()
+    dec = MorseDecoder(wpm=15)  # seeded: no hold-back, the lone E is classified at once
     for run in make_runs("E", 15):
         dec.feed(run)
     assert dec.feed(Run(False, 100)) == "E "
@@ -642,8 +758,9 @@ def test_long_mark_while_idle_leaves_nothing_to_flush():
     dec = MorseDecoder()
     for run in make_runs("S", 15):
         dec.feed(run)
-    assert dec.buffer == "..."
+    assert dec.pending_count == 5  # S is held back until the estimate is trusted
     dec.feed(SIX_SECOND_MARK)
+    assert dec.pending_count == 0
     assert dec.idle(float("inf")) == ""
     assert dec.text == ""
 
@@ -663,17 +780,18 @@ def test_beeper_fixture_marks_up_to_3700ms_are_still_symbols():
     # tests/fixtures/beeper_long_2491hz_1m.wav after the detector: ON runs of
     # 3700, 490, 570 and 2020 ms with gaps of 370, 250 and 300 ms. None is
     # longer than max_mark_ms, so all four are decoded (the 3.7 s run as a
-    # dah). The text is not Morse; what matters is that nothing is dropped.
+    # dah; the others as dits and a dah against T = 430 ms, i.e. "-..-").
+    # The text is not Morse; what matters is that nothing is dropped.
     runs = [
         Run(True, 370), Run(False, 37), Run(True, 49), Run(False, 25),
         Run(True, 57), Run(False, 30), Run(True, 202),
     ]
     dec = MorseDecoder()
     assert dec.feed(runs[0]) == ""
-    assert dec.buffer == "-", "3.7 s is a dah-class mark, not an ignored one"
+    assert dec.pending_count == 1, "3.7 s is held back, not ignored"
     emitted = "".join(dec.feed(r) for r in runs[1:]) + dec.idle(float("inf"))
-    assert emitted == "TU "
-    assert dec.letter_count == 2
+    assert emitted == "X "
+    assert dec.letter_count == 1
     assert dec.unknown_count == 0
 
 

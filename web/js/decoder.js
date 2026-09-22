@@ -17,10 +17,23 @@
  * 3rd smallest for `n = 30`); never interpolate between order statistics.
  *
  * Then `T = (M + G) / 2` and `d = (M - G) / 2`; if `d < 0` use `T = M` and
- * `d = 0`. With fewer than two marks or one gap the estimate falls back to
- * `T = 1200 / wpm` when a speed was given, else `T = 150 ms`, and `d = 0`.
- * When `adaptive` is false and `wpm` was given, `T` stays fixed and only `d`
- * adapts.
+ * `d = 0`. When only one mark class has been seen (longest mark below twice
+ * the shortest) and `M >= 2.5 G`, the marks are dahs rather than dits:
+ * `T = (M + G) / 4`, `d = (M - 3G) / 4` (a second gap class, when present,
+ * arbitrates: see `_marksAreDahs`). With both classes present but dits rare,
+ * `M` is taken from the dit class itself. With fewer than two marks or one gap
+ * the estimate falls back to `T = 1200 / wpm` when a speed was given, else
+ * `T = 150 ms`, and `d = 0`. When `adaptive` is false and `wpm` was given, `T`
+ * stays fixed and only `d` adapts.
+ *
+ * Hold-back
+ * ---------
+ * Without a WPM seed a mark alone cannot tell a slow dit from a fast dah, so
+ * runs are held back (`timingReady` false, `pendingCount` > 0) until the
+ * estimate is trusted: both mark classes seen (longest mark >= 2 x shortest)
+ * or five marks. The held runs are then classified in one go, so a message
+ * may open with T, M, O or a digit and may be keyed at 2 WPM. While holding,
+ * `idle()` flushes after the longer of `7T` and `3.5 x` the longest held mark.
  *
  * Marks are corrected as `ms - d` and gaps as `ms + d`. A corrected mark
  * `< 2T` is a dit, otherwise a dah. A corrected gap `< 2T` is inside a
@@ -52,6 +65,11 @@ const DIT_DAH_SPLIT = 2.0; // corrected mark >= this * T is a dah
 const LETTER_GAP = 2.0; // corrected gap >= this * T ends the letter
 const WORD_GAP = 5.0; // corrected gap >= this * T ends the word
 const IDLE_FLUSH = 7.0; // idle OFF (corrected) > this * T flushes the pending letter
+const TRUST_RATIO = 2.0; // longest/shortest mark >= this: both mark classes have been seen
+const TRUST_MARKS = 5; // ... or this many marks: the estimate is trusted and classification starts
+const DAH_RULE_RATIO = 2.5; // single-class marks >= this * shortest gap are dahs, not dits
+const PENDING_IDLE_FACTOR = 3.5; // untrusted: idle flush waits this * longest pending mark
+const FRAGMENT_MS = 20.0; // marks this short never anchor the dit class (debounce leftovers)
 
 /**
  * Return the q-th percentile of `values` by the nearest-rank method.
@@ -158,6 +176,14 @@ export class MorseDecoder {
     this._gaps = new SlidingWindow(this._window);
     /** @type {boolean} */
     this._seenMark = false;
+    /**
+     * Runs held back until the timing estimate is trusted (Auto mode only:
+     * a WPM seed makes the estimate trusted from the start).
+     * @type {Array<{on: boolean, ms: number}>}
+     */
+    this._pending = [];
+    /** @type {boolean} */
+    this._trusted = this._wpm !== null;
 
     /** @type {number} */
     this.ditMs = this._seedDitMs();
@@ -200,14 +226,15 @@ export class MorseDecoder {
     if (run.on) {
       if (ms >= this.maxMarkMs) {
         this.buffer = "";
+        this._pending.length = 0;
         return "";
       }
       this._marks.push(ms);
       this._seenMark = true;
       this._updateTiming();
-      const corrected = ms - this.offsetMs;
-      this.buffer += corrected < DIT_DAH_SPLIT * this.ditMs ? "." : "-";
-      return "";
+      if (this._trusted && !this._pending.length) return this._classifyMark(ms);
+      this._pending.push({ on: true, ms });
+      return this._trusted ? this._replay() : "";
     }
 
     if (!this._seenMark) {
@@ -215,15 +242,49 @@ export class MorseDecoder {
     }
     this._gaps.push(ms);
     this._updateTiming();
-    const corrected = ms + this.offsetMs;
-    if (corrected < LETTER_GAP * this.ditMs) {
-      return "";
-    }
-    let emitted = this._flushLetter();
-    if (corrected >= WORD_GAP * this.ditMs) {
-      emitted += this._endWord();
-    }
-    return emitted;
+    if (this._trusted && !this._pending.length) return this._classifyGap(ms);
+    if (!this._pending.length) return ""; // untrusted with nothing held: an idle flush already closed the letter
+    this._pending.push({ on: false, ms });
+    return this._trusted ? this._replay() : "";
+  }
+
+  /**
+   * `true` once the estimate is trusted and runs are classified as they
+   * arrive. Without a WPM seed the first runs are held back: a mark alone
+   * cannot tell a slow dit from a fast dah. The estimate is trusted once both
+   * mark classes have been seen (longest mark >= 2 x shortest) or five marks
+   * have arrived; the held runs are then decoded in one go.
+   * @returns {boolean}
+   */
+  get timingReady() {
+    return this._trusted;
+  }
+
+  /** Number of final runs held back while the estimate is not yet trusted. @returns {number} */
+  get pendingCount() {
+    return this._pending.length;
+  }
+
+  /**
+   * Take over `other`'s recent-run windows and trust state, then recompute.
+   *
+   * Used when the UI swaps decoders (Auto/Manual speed): the new decoder
+   * starts with the measured speed and reverb offset instead of re-learning
+   * them. Text, pending letter, counters and held-back runs are not copied;
+   * flush `other` first (`idle(Infinity)`) if a letter is in progress. With a
+   * fixed `wpm` only the windows are taken, so `T` stays at the seed and `d`
+   * comes from the history.
+   *
+   * @param {MorseDecoder} other
+   */
+  adoptTiming(other) {
+    this._marks.clear();
+    for (const v of other._marks.items) this._marks.push(v);
+    this._gaps.clear();
+    for (const v of other._gaps.items) this._gaps.push(v);
+    this._seenMark = other._seenMark;
+    if (this._wpm === null) this._trusted = other._trusted;
+    this._updateTiming();
   }
 
   /**
@@ -239,6 +300,18 @@ export class MorseDecoder {
    * @returns {string}
    */
   idle(offMs) {
+    if (this._pending.length) {
+      // A held mark may be a dah whose letter gap is as long as itself, so
+      // wait for the longer of 7T and 3.5 x the longest held mark, then decode
+      // the held runs with the best estimate available.
+      let longest = 0;
+      for (const r of this._pending) if (r.on && r.ms > longest) longest = r.ms;
+      const limit = Math.max(IDLE_FLUSH * this.ditMs, PENDING_IDLE_FACTOR * longest);
+      if (offMs + this.offsetMs > limit) {
+        return this._replay() + this._flushLetter() + this._endWord();
+      }
+      return "";
+    }
     if (!this.buffer) return "";
     if (offMs + this.offsetMs > IDLE_FLUSH * this.ditMs) {
       return this._flushLetter() + this._endWord();
@@ -261,9 +334,11 @@ export class MorseDecoder {
     this.letterCount = 0;
     this.unknownCount = 0;
     this._seenMark = false;
+    this._pending.length = 0;
     if (!keepTiming) {
       this._marks.clear();
       this._gaps.clear();
+      this._trusted = this._wpm !== null;
       this._updateTiming();
     }
   }
@@ -275,7 +350,41 @@ export class MorseDecoder {
     return this._wpm !== null ? 1200.0 / this._wpm : DEFAULT_DIT_MS;
   }
 
-  /** Recompute `ditMs` and `offsetMs` from the recent runs. */
+  /** @param {number} ms @returns {string} */
+  _classifyMark(ms) {
+    const corrected = ms - this.offsetMs;
+    this.buffer += corrected < DIT_DAH_SPLIT * this.ditMs ? "." : "-";
+    return "";
+  }
+
+  /** @param {number} ms @returns {string} */
+  _classifyGap(ms) {
+    const corrected = ms + this.offsetMs;
+    if (corrected < LETTER_GAP * this.ditMs) return "";
+    let emitted = this._flushLetter();
+    if (corrected >= WORD_GAP * this.ditMs) emitted += this._endWord();
+    return emitted;
+  }
+
+  /** Classify every held-back run with the current estimate, oldest first. @returns {string} */
+  _replay() {
+    let emitted = "";
+    for (const r of this._pending) emitted += r.on ? this._classifyMark(r.ms) : this._classifyGap(r.ms);
+    this._pending.length = 0;
+    return emitted;
+  }
+
+  /**
+   * Recompute `ditMs` and `offsetMs` from the recent runs; refresh trust.
+   *
+   * `M` and `G` are the nearest-rank 10th percentiles of the recent marks and
+   * (capped) gaps. Normally the shortest mark is a dit (`T + d`) and the
+   * shortest gap a dit gap (`T - d`), so `T = (M + G) / 2`, `d = (M - G) / 2`.
+   * When only one mark class has been seen (longest mark below twice the
+   * shortest) and the marks are at least 2.5 x the shortest gap, they are dahs
+   * (`3T + d`): `T = (M + G) / 4`, `d = (M - 3G) / 4`. That keeps a message
+   * opening with T, M, O or a digit like 0 from being read as dits.
+   */
   _updateTiming() {
     const seed = this._seedDitMs();
     if (this._marks.length < 2 || this._gaps.length < 1) {
@@ -283,22 +392,60 @@ export class MorseDecoder {
       this.offsetMs = 0.0;
       return;
     }
-    const m = nearestRankPercentile(this._marks.items, PERCENTILE);
+    let m = nearestRankPercentile(this._marks.items, PERCENTILE);
     const cap = GAP_CAP_FACTOR * m;
     const g = nearestRankPercentile(this._gaps.items.map((gap) => Math.min(gap, cap)), PERCENTILE);
-    const d = (m - g) / 2.0;
     if (!this._adaptive && this._wpm !== null) {
       this.ditMs = seed;
-      this.offsetMs = Math.max(d, 0.0);
+      this.offsetMs = Math.max((m - g) / 2.0, 0.0);
       return;
     }
-    if (d < 0.0) {
-      this.ditMs = m;
-      this.offsetMs = 0.0;
-    } else {
-      this.ditMs = (m + g) / 2.0;
-      this.offsetMs = d;
+    const marks = this._marks.items;
+    const singleClass = Math.max(...marks) < TRUST_RATIO * Math.min(...marks);
+    if (!singleClass) {
+      // Both classes present but dits may be rare (digits, "MOM"): when the
+      // 10th percentile lands in the dah class, take the dit class itself.
+      // Marks of two blocks or less are debounce leftovers and never anchor it.
+      const usable = marks.filter((x) => x > FRAGMENT_MS);
+      const anchor = usable.length ? Math.min(...usable) : Math.min(...marks);
+      if (m >= DAH_RULE_RATIO * g && m >= TRUST_RATIO * anchor) {
+        m = nearestRankPercentile(marks.filter((x) => x >= anchor && x < TRUST_RATIO * anchor), 50.0);
+      }
     }
+    if (singleClass && m >= DAH_RULE_RATIO * g && this._marksAreDahs(m, g)) {
+      this.ditMs = (m + g) / 4.0;
+      this.offsetMs = Math.max((m - 3.0 * g) / 4.0, 0.0);
+    } else {
+      const d = (m - g) / 2.0;
+      if (d < 0.0) {
+        this.ditMs = m;
+        this.offsetMs = 0.0;
+      } else {
+        this.ditMs = (m + g) / 2.0;
+        this.offsetMs = d;
+      }
+    }
+    if (!this._trusted && (!singleClass || marks.length >= TRUST_MARKS)) this._trusted = true;
+  }
+
+  /**
+   * Single-class window with `m >= 2.5 g`: dahs (`3T + d`) or reverberant dits?
+   *
+   * Without a second gap class the ratio alone decides. With one (the
+   * shortest gap at least twice `g`: a letter or word gap), compare it with
+   * the letter and word gaps each hypothesis predicts and keep the closer in
+   * log distance. Dahs: letter `(m + 3g) / 2`, word `(3m + 5g) / 2`. Dits:
+   * letter `m + 2g`, word `3m + 4g`.
+   *
+   * @param {number} m @param {number} g @returns {boolean}
+   */
+  _marksAreDahs(m, g) {
+    const cap = GAP_CAP_FACTOR * m;
+    const longer = this._gaps.items.map((x) => Math.min(x, cap)).filter((x) => x >= TRUST_RATIO * g);
+    if (!longer.length) return true;
+    const g2 = Math.min(...longer);
+    const score = (letter, word) => Math.min(Math.abs(Math.log(g2 / letter)), Math.abs(Math.log(g2 / word)));
+    return score((m + 3.0 * g) / 2.0, (3.0 * m + 5.0 * g) / 2.0) <= score(m + 2.0 * g, 3.0 * m + 4.0 * g);
   }
 
   /** Decode `buffer` into one character, append it and return it. @returns {string} */

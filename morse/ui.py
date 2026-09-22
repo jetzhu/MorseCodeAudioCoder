@@ -38,7 +38,7 @@ import math
 import sys
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -116,7 +116,7 @@ PLAY_LATENCY_MS = 80.0
 """Assumed output latency: the playhead starts this long after Play is pressed."""
 FREQ_MIN_HZ = 100
 FREQ_MAX_HZ = 8000
-WPM_MIN = 3
+WPM_MIN = 2
 WPM_MAX = 40
 MAIN_ROW_HEIGHTS = (212, 232, 168)
 """Minimum heights of the spectrum, power and decoded panels (from the mock)."""
@@ -635,11 +635,37 @@ class MarkHistogram(_Painted):
         p.end()
 
 
+def layout_guide_labels(
+    letters: Sequence[tuple[str, float, float]],
+    x_of: Callable[[float], float],
+    width_of: Callable[[str], float],
+    pad: float = 3.0,
+) -> list[tuple[str, float]]:
+    """Place the keying guide's letter labels so none overlap.
+
+    Every letter gets a label centred on its span when there is room; a label
+    that would collide with the one placed before it is skipped. Narrow letters
+    (a lone dit such as E) are placed like any other, since neighbouring
+    letters sit at least a letter gap away. Pure function, mirrored by
+    ``layoutGuideLabels`` in ``web/js/player.js``. Returns ``(char, centre_x)``
+    pairs in message order.
+    """
+    placed: list[tuple[str, float]] = []
+    last_right = -math.inf
+    for ch, start, end in letters:
+        cx = x_of((start + end) / 2.0)
+        half = width_of(ch) / 2.0
+        if cx - half < last_right + pad:
+            continue
+        placed.append((ch, cx))
+        last_right = cx + half
+    return placed
+
+
 class KeyingGuide(_Painted):
     """Marks and gaps of the encoded message drawn to scale, letters labelled above."""
 
     TOP = 16
-    MIN_LABEL_W = 9
 
     def __init__(self, theme: Theme, fonts: Fonts, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(theme, fonts, height=46, parent=parent)
@@ -684,12 +710,15 @@ class KeyingGuide(_Painted):
                 p.fillRect(QtCore.QRectF(x(cursor), top, max(1.0, x(ms) - 1), bh), on_brush)
             cursor += ms
         p.setPen(_qcolor(t.ink2))
-        p.setFont(make_font(self.fonts, 11, mono=True))
-        for ch, start, end in enc.letters:
-            width = x(end) - x(start)
-            if width >= self.MIN_LABEL_W:
-                rect = QtCore.QRectF(x(start) - 20, 0, width + 40, top - 2)
-                p.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, ch)
+        font = make_font(self.fonts, 11, mono=True)
+        p.setFont(font)
+        metrics = QtGui.QFontMetricsF(font)
+        # Every letter is labelled, however narrow (a lone dit like E); only a
+        # label that would overlap its predecessor is skipped.
+        for ch, cx in layout_guide_labels(enc.letters, x, metrics.horizontalAdvance):
+            half = metrics.horizontalAdvance(ch) / 2
+            rect = QtCore.QRectF(cx - half - 1, 0, 2 * half + 2, top - 2)
+            p.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, ch)
         if self.playhead_ms is not None and 0.0 <= self.playhead_ms <= enc.total_ms:
             p.setPen(Qt.PenStyle.NoPen)
             p.fillRect(QtCore.QRectF(x(self.playhead_ms) - 1, top - 4, 2, bh + 8), _qcolor(t.ink))
@@ -820,6 +849,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._text_shown: str | None = None
         self._player: TonePlayer | None = None
         self._play_started: float | None = None
+        # Rendered tone being mixed into the pipeline's input while Play runs and
+        # "Feed the decoder" is on (a software loopback, independent of speakers
+        # and microphone); ``_inject_pos`` is the next sample to mix.
+        self._inject: np.ndarray | None = None
+        self._inject_pos: int = 0
         self._encoding: Encoding = build_encoding("", 8)
 
         self.setWindowTitle("Beeper Morse Console")
@@ -1264,6 +1298,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.copy_button = self._button("Copy")
         self.copy_button.clicked.connect(self._on_copy)
         row.addWidget(self.copy_button)
+        self.feed_check = QtWidgets.QCheckBox("Feed the decoder")
+        self.feed_check.setChecked(True)
+        self.feed_check.setFont(self._font(12))
+        self.feed_check.setToolTip("While listening, Play is also mixed straight into the decoder, "
+                                   "independent of speakers, microphone and audio processing.")
+        row.addWidget(self.feed_check)
         left_lay.addLayout(row)
         out_frame = QtWidgets.QFrame()
         out_frame.setObjectName("encOut")
@@ -1480,6 +1520,27 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------------------------------------------- tick
 
     @QtCore.Slot()
+    def _mix_injected(self, block: np.ndarray) -> np.ndarray:
+        """Add the next slice of the playing tone to ``block`` while Feed the decoder is on.
+
+        The slice advances with the input clock, so the injected tone keeps
+        pace with real time whatever the output device does.  Once the tone
+        is used up the injection ends on its own.
+        """
+        tone = self._inject
+        if tone is None:
+            return block
+        start = self._inject_pos
+        seg = tone[start:start + block.size]
+        self._inject_pos = start + block.size
+        if self._inject_pos >= tone.size:
+            self._inject = None
+        if seg.size == 0:
+            return block
+        mixed = np.array(block, dtype=np.float32, copy=True)
+        mixed[:seg.size] += seg
+        return mixed
+
     def on_tick(self) -> None:
         """Timer slot: drain the source, run the pipeline, redraw.  Never raises."""
         try:
@@ -1510,6 +1571,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _process_block(self, block: np.ndarray) -> float:
         """Run one block through the pipeline and the history buffers; returns its level."""
+        block = self._mix_injected(block)
         result = self.pipeline.process_block(block)
         self._last = result
         self._raw.extend(block)
@@ -1770,10 +1832,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _replace_decoder(self, wpm: float | None, adaptive: bool) -> None:
         """Swap the decoder for one with the new speed settings.
 
-        Text, the pending letter and the counters carry over.  So do the
-        recent mark and gap lengths when the decoder exposes them (private
-        deques, read defensively), so Manual mode gets its reverb offset and
-        a return to Auto gets its speed estimate without re-learning.
+        Text, the pending letter and the counters carry over, and so does the
+        timing history (``MorseDecoder.adopt_timing``), so Manual mode gets
+        its reverb offset and a return to Auto gets its speed estimate
+        without re-learning.
         """
         old = self.pipeline.decoder
         new = MorseDecoder(wpm=wpm, adaptive=adaptive)
@@ -1781,15 +1843,7 @@ class MainWindow(QtWidgets.QMainWindow):
         new.buffer = old.buffer
         new.letter_count = old.letter_count
         new.unknown_count = old.unknown_count
-        for name in ("_marks", "_gaps"):
-            src, dst = getattr(old, name, None), getattr(new, name, None)
-            if src is not None and dst is not None:
-                dst.extend(src)
-        if hasattr(old, "_seen_mark") and hasattr(new, "_seen_mark"):
-            new._seen_mark = old._seen_mark
-        update = getattr(new, "_update_timing", None)
-        if callable(update):
-            update()
+        new.adopt_timing(old)  # measured speed and reverb offset carry over (same as the web app)
         self.pipeline.decoder = new
 
     def _on_pause(self) -> None:
@@ -1892,6 +1946,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.set_status_error("")
         self._play_started = time.monotonic()
+        if self.feed_check.isChecked() and self._source is not None:
+            self._inject = np.asarray(samples, dtype=np.float32)
+            self._inject_pos = 0
+        else:
+            self._inject = None
         self.play_button.setText("Stop")
         self.keying_guide.set_playhead(0.0)
 
@@ -1899,6 +1958,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._play_started is None:
             return
         self._play_started = None
+        self._inject = None
         try:
             if self._player is not None:
                 self._player.stop()

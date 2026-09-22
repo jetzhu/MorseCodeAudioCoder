@@ -246,6 +246,35 @@ def build_cases() -> list[dict[str, Any]]:
             },
         ),
         _decode_case(
+            "oso-15wpm-dah-leading",
+            "OSO at 15 WPM: the message opens with a dah-only letter. The first runs are held "
+            "back until both mark classes have been seen, then replayed; the old seed-based rule "
+            "read this as SSO.",
+            make_runs("OSO", 15),
+            _text_parameters("OSO", 15),
+        ),
+        _decode_case(
+            "sos-hello-3wpm",
+            "SOS HELLO at 3 WPM (400 ms dit): slow keying, held back until the first dah of O.",
+            make_runs("SOS HELLO", 3),
+            _text_parameters("SOS HELLO", 3),
+        ),
+        _decode_case(
+            "hello-world-2wpm",
+            "HELLO WORLD at 2 WPM (600 ms dit), the slowest supported speed.",
+            make_runs("HELLO WORLD", 2),
+            _text_parameters("HELLO WORLD", 2),
+        ),
+        _decode_case(
+            "lone-o-idle-flush",
+            "O alone at 15 WPM, then silence: three equal marks 3x the intra gaps. The dah rule "
+            "gives T = 80 ms; while runs are held back idle() waits for max(7T, 3.5 x 240) = 840 ms "
+            "(840 is not > 840, 850 is).",
+            make_runs("O", 15),
+            {**_text_parameters("O", 15), "idle_probe_ms": [560, 840, 850, 5000]},
+            idle_probe_ms=(560, 840, 850, 5000),
+        ),
+        _decode_case(
             "unknown-symbol",
             "Six dits in one letter (not in the table), a word gap, then S: emits '?' once and "
             "counts it in unknown_count.",

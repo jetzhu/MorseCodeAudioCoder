@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { TonePlayer, buildGuide, buildTiming, ditMs, roundHalfEven, timingDurationMs } from "../js/player.js";
+import { TonePlayer, buildGuide, buildTiming, ditMs, layoutGuideLabels, roundHalfEven, timingDurationMs } from "../js/player.js";
 
 const seg = (on, ms) => ({ on, ms });
 
@@ -443,4 +443,52 @@ test("the oscillator's onended also ends playback", () => {
   assert.equal(ended, 1);
   player.stop();
   assert.equal(ended, 1);
+});
+
+// ------------------------------------------------ keying guide labels, outputs
+
+test("layoutGuideLabels labels every letter of HELLO WORLD! including the E", () => {
+  // At 8 WPM in an 800 px guide the E is a single 150 ms dit about 6 px wide;
+  // a minimum-width gate used to drop its label.
+  const { letters, totalMs } = buildGuide("HELLO WORLD!", 8);
+  const scale = 800 / totalMs;
+  const placed = layoutGuideLabels(letters, (ms) => ms * scale, () => 7);
+  assert.deepEqual(placed.map((p) => p.ch), [..."HELLOWORLD!"]);
+  const xs = placed.map((p) => p.x);
+  for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] >= 7 + 3, "labels never overlap");
+});
+
+test("layoutGuideLabels skips only colliding labels when squeezed", () => {
+  const { letters, totalMs } = buildGuide("HELLO WORLD!", 8);
+  const scale = 60 / totalMs;
+  const placed = layoutGuideLabels(letters, (ms) => ms * scale, () => 7);
+  assert.ok(placed.length > 0 && placed.length < letters.length);
+  assert.equal(placed[0].ch, "H");
+  const xs = placed.map((p) => p.x);
+  for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] >= 10);
+});
+
+test("TonePlayer extra outputs: registered before play, connected live, removable", () => {
+  const ac = new FakeAudioContext({ state: "running" });
+  const player = new TonePlayer(ac);
+  const bus = new FakeNode();
+  player.addOutput(bus);
+  player.addOutput(bus); // idempotent
+  assert.deepEqual(player.outputs, [bus]);
+  player.play(SOS_10WPM, 2491, 0.15);
+  const gain = ac.gains[0];
+  assert.ok(gain.connectedTo.includes(ac.destination), "speakers still get the tone");
+  assert.ok(gain.connectedTo.includes(bus), "the bus gets the tone");
+  const late = new FakeNode();
+  player.addOutput(late);
+  assert.ok(gain.connectedTo.includes(late), "an output added while playing is connected at once");
+  player.removeOutput(late);
+  assert.deepEqual(player.outputs, [bus]);
+  player.clearOutputs();
+  assert.deepEqual(player.outputs, []);
+  player.stop();
+  player.addOutput(bus);
+  player.play(SOS_10WPM, 2491, 0.15);
+  assert.ok(ac.gains[1].connectedTo.includes(bus), "outputs persist across plays");
+  player.stop();
 });

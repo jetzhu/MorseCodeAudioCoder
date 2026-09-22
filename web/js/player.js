@@ -162,6 +162,47 @@ export function timingDurationMs(timing) {
  * - `stop()` cuts the tone at once and calls `onEnd()`; it is a no-op when
  *   nothing is playing.
  */
+/**
+ * Connect `from` to `to`, ignoring nodes that refuse (already connected,
+ * different context, torn down).
+ * @param {AudioNode} from @param {AudioNode} to
+ */
+function safeConnect(from, to) {
+  try {
+    from.connect(to);
+  } catch {
+    /* leave the speakers path alone */
+  }
+}
+
+/**
+ * Place the letter labels of a keying guide so none overlap.
+ *
+ * Every letter gets a label centred on its span when there is room; a label
+ * that would collide with the one drawn before it is skipped. Narrow letters
+ * (a lone dit such as E) are placed like any other, since the neighbouring
+ * letters sit at least a letter gap away. Pure function: the caller supplies
+ * the horizontal scale (`xOf(ms)`) and the text measurer (`widthOf(ch)`).
+ *
+ * @param {Array<{ch: string, startMs: number, endMs: number}>} letters from {@link buildGuide}
+ * @param {(ms: number) => number} xOf pixel position of a time
+ * @param {(ch: string) => number} widthOf rendered width of a label
+ * @param {number} [pad=3] minimum pixels between neighbouring labels
+ * @returns {Array<{ch: string, x: number}>} label text and centre x, in order
+ */
+export function layoutGuideLabels(letters, xOf, widthOf, pad = 3) {
+  const placed = [];
+  let lastRight = -Infinity;
+  for (const L of letters) {
+    const cx = xOf((L.startMs + L.endMs) / 2);
+    const half = widthOf(L.ch) / 2;
+    if (cx - half < lastRight + pad) continue;
+    placed.push({ ch: L.ch, x: cx });
+    lastRight = cx + half;
+  }
+  return placed;
+}
+
 export class TonePlayer {
   /**
    * @param {AudioContext | null} audioContext created by the caller from a
@@ -187,6 +228,13 @@ export class TonePlayer {
     /** @type {number} total length (ms) of the current playback */
     this.durationMs = 0;
 
+    /**
+     * Extra destinations for the keyed tone besides the speakers: the
+     * decoder's input bus, so Play can be decoded without going through the
+     * room, the microphone and whatever the OS does to it.
+     * @type {Set<AudioNode>}
+     */
+    this._outputs = new Set();
     /** @type {OscillatorNode | null} */
     this._osc = null;
     /** @type {GainNode | null} */
@@ -246,7 +294,9 @@ export class TonePlayer {
     osc.frequency.value = f0;
     const gainNode = ac.createGain();
     gainNode.gain.setValueAtTime(0, ac.currentTime);
-    osc.connect(gainNode).connect(ac.destination);
+    osc.connect(gainNode);
+    gainNode.connect(ac.destination);
+    for (const node of this._outputs) safeConnect(gainNode, node);
 
     const t0 = ac.currentTime + this.leadMs / 1000;
     let t = t0;
@@ -279,6 +329,40 @@ export class TonePlayer {
   /** Stop at once; calls `onEnd` if something was playing. */
   stop() {
     if (this._playing) this._teardown(true);
+  }
+
+  /**
+   * Also send the keyed tone to `node` (for example the decoder's input bus).
+   * Takes effect at once when something is playing and for every later `play`.
+   *
+   * @param {AudioNode} node
+   */
+  addOutput(node) {
+    if (!node || this._outputs.has(node)) return;
+    this._outputs.add(node);
+    if (this._gain) safeConnect(this._gain, node);
+  }
+
+  /** Stop sending the tone to `node`. @param {AudioNode} node */
+  removeOutput(node) {
+    if (!this._outputs.delete(node)) return;
+    if (this._gain) {
+      try {
+        this._gain.disconnect(node);
+      } catch {
+        /* not connected */
+      }
+    }
+  }
+
+  /** Drop every extra output; the speakers keep playing. */
+  clearOutputs() {
+    for (const node of Array.from(this._outputs)) this.removeOutput(node);
+  }
+
+  /** The extra outputs currently registered. @returns {AudioNode[]} */
+  get outputs() {
+    return Array.from(this._outputs);
   }
 
   // --------------------------------------------------------------- private

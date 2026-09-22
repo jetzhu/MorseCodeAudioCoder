@@ -19,7 +19,7 @@ ON runs, all with the detector's default settings.
 Three ways to use it: download the self-contained Windows app, `pip install`
 the package on any platform with Python, or open the browser version. The
 desktop app is the reference implementation and the one to use when the
-browser only receives a processed microphone signal.
+browser only receives a processed microphone signal (Firefox on Windows).
 
 ## Download (Windows, no Python needed)
 
@@ -55,9 +55,13 @@ sounddevice wheel bundles it only on Windows and macOS.
 
 The same decoder runs in the browser at
 <https://jetzhu.github.io/MorseCodeAudioCoder/> (current Chrome or Edge; the
-source is in `web/`, deployed by `.github/workflows/pages.yml`). A browser gets
-the microphone as Windows exposes it to applications, which on many laptops is
-a processed path that chops the tone (`docs/PLAN.md`, section 10). When the
+source is in `web/`, deployed by `.github/workflows/pages.yml`). Chromium
+browsers open the microphone in Windows raw mode when a page turns processing
+off, so the beeper arrives clean. Firefox gets the shared, processed path,
+which removes steady tones after about 50 ms and removes the machine's own
+output entirely (`docs/PLAN.md`, section 10); use Edge or Chrome there, or the
+encoder's "Feed the decoder" option, which mixes Play straight into the
+decoder. When the
 page reports a processed signal, turn off Audio enhancements for the
 microphone in Windows Sound settings, or use the desktop app, which reads the
 raw endpoint. The page also lists the desktop download.

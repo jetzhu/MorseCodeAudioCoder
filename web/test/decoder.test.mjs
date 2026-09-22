@@ -278,12 +278,127 @@ test("20 % jitter at 12 WPM still decodes (20 seeds, three texts)", () => {
 });
 
 test("digits and punctuation decode", () => {
-  // 'C' opens with a dah: before two marks have arrived only the seed is
-  // available, so a message that starts with a dah needs a WPM seed.
+  // 'C' opens with a dah. The first runs are held back until both mark
+  // classes have been seen, so no WPM seed is needed any more (it still works).
   let r = decodeRuns(makeRuns("CQ DE W1AW 73 K.", 15, { jitter: 0.1, seed: 3 }), { wpm: 15 });
+  assert.equal(r.emitted.trim(), "CQ DE W1AW 73 K.");
+  r = decodeRuns(makeRuns("CQ DE W1AW 73 K.", 15, { jitter: 0.1, seed: 3 }));
   assert.equal(r.emitted.trim(), "CQ DE W1AW 73 K.");
   r = decodeRuns(makeRuns("ITS 73 DE W1AW K.", 15, { jitter: 0.1, seed: 3 }));
   assert.equal(r.emitted.trim(), "ITS 73 DE W1AW K.");
+});
+
+// ----------------------------------------------------- hold-back and dah rule
+
+test("messages opening with dah letters decode without a seed", () => {
+  for (const text of ["OSO", "TEST", "MOM", "MORSE CODE", "OK", "0 TO 9", "TTT EEE"]) {
+    for (const wpm of [8, 15, 25]) {
+      const { emitted, dec } = decodeRuns(makeRuns(text, wpm));
+      assert.equal(emitted.trim(), text, `${text} @ ${wpm}`);
+      assertClose(dec.ditMs / (1200 / wpm), 1, 0.06, `${text} @ ${wpm}: ditMs`);
+    }
+  }
+});
+
+test("slow keying down to 2 WPM", () => {
+  for (const wpm of [2, 3, 4, 5, 6, 7]) {
+    for (const text of ["SOS HELLO", "HELLO WORLD", "TEST 123"]) {
+      const { emitted, dec } = decodeRuns(makeRuns(text, wpm));
+      assert.equal(emitted.trim(), text, `${text} @ ${wpm}`);
+      assertClose(dec.ditMs / (1200 / wpm), 1, 0.06, `${text} @ ${wpm}: ditMs`);
+    }
+  }
+});
+
+test("runs are held back until the estimate is trusted", () => {
+  const dec = new MorseDecoder();
+  const runs = makeRuns("SOS", 3); // 400 ms dits: the old seed read the first one as a dah
+  assert.equal(dec.timingReady, false);
+  let out = "";
+  for (const r of runs.slice(0, 6)) out += dec.feed(r);
+  assert.equal(out, "");
+  assert.equal(dec.buffer, "");
+  assert.equal(dec.timingReady, false);
+  assert.equal(dec.pendingCount, 6);
+  out = dec.feed(runs[6]); // first dah of O: both classes visible, everything replays
+  assert.equal(dec.timingReady, true);
+  assert.equal(dec.pendingCount, 0);
+  assert.equal(out, "S");
+  assert.equal(dec.buffer, "-");
+  assertClose(dec.ditMs, 400);
+});
+
+test("five marks of one class are enough to trust", () => {
+  const dec = new MorseDecoder();
+  let out = "";
+  for (const r of makeRuns("EIS", 10)) out += dec.feed(r); // dits only
+  assert.equal(dec.timingReady, true);
+  out += dec.idle(1_000_000);
+  assert.equal(out.trim(), "EIS");
+});
+
+test("idle flushes held runs with the best estimate", () => {
+  assert.equal(decodeRuns(makeRuns("E", 15)).emitted, "E ");
+  assert.equal(decodeRuns(makeRuns("T", 8)).emitted, "T ");
+  assert.equal(decodeRuns(makeRuns("S", 3)).emitted, "S ");
+  const { emitted, dec } = decodeRuns(makeRuns("O", 15));
+  assert.equal(emitted, "O "); // dah rule: marks are 3x the intra gaps
+  assertClose(dec.ditMs, 80);
+});
+
+test("held runs wait for a slow letter gap before flushing", () => {
+  const dec = new MorseDecoder();
+  const [e1, gap, e2] = makeRuns("EE", 2);
+  assert.equal(dec.feed(e1), "");
+  assert.equal(dec.idle(1700), ""); // limit is max(7 x 150, 3.5 x 600) = 2100 ms
+  assert.equal(dec.feed(gap), "");
+  let out = dec.feed(e2);
+  assert.equal(dec.timingReady, false);
+  out += dec.idle(1_000_000);
+  assert.equal(out, "EE ");
+});
+
+test("an over-long mark clears held runs too", () => {
+  const dec = new MorseDecoder();
+  for (const r of makeRuns("S", 3)) dec.feed(r);
+  assert.ok(dec.pendingCount > 0);
+  assert.equal(dec.feed(R(true, 600)), "");
+  assert.equal(dec.pendingCount, 0);
+  assert.equal(dec.buffer, "");
+  assert.equal(dec.unknownCount, 0);
+});
+
+test("adoptTiming transfers speed and offset", () => {
+  const { dec: source } = decodeRuns(makeRuns("PARIS PARIS", 15, { offsetMs: 30 }));
+  const fresh = new MorseDecoder();
+  assert.equal(fresh.timingReady, false);
+  fresh.adoptTiming(source);
+  assert.equal(fresh.timingReady, true);
+  assertClose(fresh.ditMs, source.ditMs);
+  assertClose(fresh.offsetMs, source.offsetMs);
+  assert.equal(fresh.text, "");
+  const manual = new MorseDecoder({ wpm: 10, adaptive: false });
+  manual.adoptTiming(source);
+  assertClose(manual.ditMs, 120);
+  assertClose(manual.offsetMs, source.offsetMs);
+  let out = "";
+  for (const r of makeRuns("SOS", 15, { offsetMs: 30 })) out += fresh.feed(r);
+  out += fresh.idle(1_000_000);
+  assert.equal(out.trim(), "SOS");
+});
+
+test("reset clears held runs and trust", () => {
+  const dec = new MorseDecoder();
+  for (const r of makeRuns("SO", 15)) dec.feed(r);
+  assert.equal(dec.timingReady, true);
+  dec.reset();
+  assert.equal(dec.timingReady, false);
+  assert.equal(dec.pendingCount, 0);
+  const dec2 = new MorseDecoder();
+  for (const r of makeRuns("SO", 15)) dec2.feed(r);
+  dec2.reset(true);
+  assert.equal(dec2.timingReady, true);
+  assertClose(dec2.ditMs, 80);
 });
 
 test("speed-change parity text is pinned to nearest rank", () => {
@@ -528,7 +643,7 @@ test("leading gap emits nothing and is ignored for timing", () => {
 test("word gap adds exactly one space", () => {
   const { emitted } = decodeRuns(makeRuns("SOS SOS", 15));
   assert.equal(emitted, "SOS SOS ");
-  const dec = new MorseDecoder();
+  const dec = new MorseDecoder({ wpm: 15 }); // seeded: no hold-back, the lone E is classified at once
   for (const run of makeRuns("E", 15)) dec.feed(run);
   assert.equal(dec.feed(R(false, 100)), "E ");
   assert.equal(dec.feed(R(false, 100)), ""); // a second long gap adds no space
@@ -638,8 +753,9 @@ test("long mark after a word gap adds no second space", () => {
 test("long mark while idle leaves nothing to flush", () => {
   const dec = new MorseDecoder();
   for (const run of makeRuns("S", 15)) dec.feed(run);
-  assert.equal(dec.buffer, "...");
+  assert.equal(dec.pendingCount, 5); // S is held back until the estimate is trusted
   dec.feed(SIX_SECOND_MARK);
+  assert.equal(dec.pendingCount, 0);
   assert.equal(dec.idle(Infinity), "");
   assert.equal(dec.text, "");
 });
@@ -662,10 +778,11 @@ test("beeper fixture marks up to 3700 ms are still symbols", () => {
   ];
   const dec = new MorseDecoder();
   assert.equal(dec.feed(runs[0]), "");
-  assert.equal(dec.buffer, "-", "3.7 s is a dah-class mark, not an ignored one");
+  assert.equal(dec.pendingCount, 1, "3.7 s is held back, not ignored");
+  // 3.7 s is a dah; the others read as dits and a dah against T = 430 ms: "-..-".
   const emitted = runs.slice(1).map((r) => dec.feed(r)).join("") + dec.idle(Infinity);
-  assert.equal(emitted, "TU ");
-  assert.equal(dec.letterCount, 2);
+  assert.equal(emitted, "X ");
+  assert.equal(dec.letterCount, 1);
   assert.equal(dec.unknownCount, 0);
 });
 

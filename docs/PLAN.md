@@ -239,8 +239,20 @@ kept in lock-step by shared test vectors.
 | Encoder and player | `web/js/table.js` and `web/js/player.js` (Web Audio oscillator with 3 ms ramps). |
 | Deployment | `.github/workflows/pages.yml`: on push to `main`, run the Node tests, upload `web/`, deploy with `actions/deploy-pages`. Pages source set to GitHub Actions. URL: `https://jetzhu.github.io/MorseCodeAudioCoder/`. |
 
-**Finding that shapes this (2026-09-07).** A browser can only use the
-microphone as Windows exposes it in shared mode, which is the processed path.
+**Finding that shapes this (2026-09-07, refined 2026-09-22).** Chromium
+browsers (Edge, Chrome) open the microphone in Windows raw mode when a page
+disables echo cancellation, noise suppression and gain control, so they
+bypass the enhancement processors and receive the beeper cleanly. Firefox
+uses the shared, processed path. Measured on that path on 2026-09-22 with a
+4 WPM SOS played from the laptop's own speakers: the 300 and 900 ms tones
+survived only as 40 to 60 ms fragments at each onset (noise suppression
+learns a steady tone in about 50 ms; echo cancellation removes the machine's
+own output), decoding as "E E E". This is why slow beeps read as T and why
+Play was never heard in Firefox, while Edge worked. The web app therefore
+offers "Feed the decoder", which mixes the encoder's tone straight into the
+decoder's input, and the page recommends Edge or Chrome. The 2026-09-07
+measurement follows.
+
 A loopback SOS at 2491 Hz through that path (device "Microphone Array", MME)
 came out chopped: dahs mostly suppressed, marks fragmented into 10 to 30 ms
 pieces, despite 42 dB of tone above the floor. The same test through the raw
@@ -248,11 +260,12 @@ WDM-KS endpoint gave clean 120 and 320 ms marks with 64 dB of headroom. The
 registry shows seven audio-enhancement processors active on the array with
 "disable all enhancements" unset. Mitigations, in order:
 
-1. In Windows Settings, Sound, Input, Microphone Array: turn Audio
+1. Use Edge or Chrome, which open the microphone in raw mode.
+2. In Windows Settings, Sound, Input, Microphone Array: turn Audio
    enhancements off. Re-run `tools/probe/probe_loopback.py 1` to confirm the
    processed path then passes the tone cleanly.
-2. Use a USB or headset microphone in the browser.
-3. Fall back to the Python app, which reads the raw endpoint.
+3. Use a USB or headset microphone in the browser.
+4. Fall back to the Python app, which reads the raw endpoint.
 
 The web page detects the symptom itself: when the debounce is removing many
 sub-30 ms fragments per second, it shows a hint pointing at the setting.

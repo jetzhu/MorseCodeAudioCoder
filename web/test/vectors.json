@@ -239,6 +239,125 @@
       "unknown_count": 0
     },
     {
+      "name": "oso-15wpm-dah-leading",
+      "description": "OSO at 15 WPM: the message opens with a dah-only letter. The first runs are held back until both mark classes have been seen, then replayed; the old seed-based rule read this as SSO.",
+      "parameters": {
+        "text": "OSO",
+        "wpm": 15,
+        "jitter": 0.0,
+        "offset_ms": 0.0
+      },
+      "decoder": {
+        "wpm": null,
+        "adaptive": true,
+        "window": 30
+      },
+      "runs": [
+        [true, 24], [false, 8], [true, 24], [false, 8], [true, 24], [false, 24], [true, 8],
+        [false, 8], [true, 8], [false, 8], [true, 8], [false, 24], [true, 24], [false, 8],
+        [true, 24], [false, 8], [true, 24]
+      ],
+      "text_before_idle": "OS",
+      "idle_probes": [],
+      "idle_text": "O ",
+      "text": "OSO ",
+      "dit_ms": 80.0,
+      "offset_ms": 0.0,
+      "letter_count": 3,
+      "unknown_count": 0
+    },
+    {
+      "name": "sos-hello-3wpm",
+      "description": "SOS HELLO at 3 WPM (400 ms dit): slow keying, held back until the first dah of O.",
+      "parameters": {
+        "text": "SOS HELLO",
+        "wpm": 3,
+        "jitter": 0.0,
+        "offset_ms": 0.0
+      },
+      "decoder": {
+        "wpm": null,
+        "adaptive": true,
+        "window": 30
+      },
+      "runs": [
+        [true, 40], [false, 40], [true, 40], [false, 40], [true, 40], [false, 120], [true, 120],
+        [false, 40], [true, 120], [false, 40], [true, 120], [false, 120], [true, 40], [false, 40],
+        [true, 40], [false, 40], [true, 40], [false, 280], [true, 40], [false, 40], [true, 40],
+        [false, 40], [true, 40], [false, 40], [true, 40], [false, 120], [true, 40], [false, 120],
+        [true, 40], [false, 40], [true, 120], [false, 40], [true, 40], [false, 40], [true, 40],
+        [false, 120], [true, 40], [false, 40], [true, 120], [false, 40], [true, 40], [false, 40],
+        [true, 40], [false, 120], [true, 120], [false, 40], [true, 120], [false, 40], [true, 120]
+      ],
+      "text_before_idle": "SOS HELL",
+      "idle_probes": [],
+      "idle_text": "O ",
+      "text": "SOS HELLO ",
+      "dit_ms": 400.0,
+      "offset_ms": 0.0,
+      "letter_count": 8,
+      "unknown_count": 0
+    },
+    {
+      "name": "hello-world-2wpm",
+      "description": "HELLO WORLD at 2 WPM (600 ms dit), the slowest supported speed.",
+      "parameters": {
+        "text": "HELLO WORLD",
+        "wpm": 2,
+        "jitter": 0.0,
+        "offset_ms": 0.0
+      },
+      "decoder": {
+        "wpm": null,
+        "adaptive": true,
+        "window": 30
+      },
+      "runs": [
+        [true, 60], [false, 60], [true, 60], [false, 60], [true, 60], [false, 60], [true, 60],
+        [false, 180], [true, 60], [false, 180], [true, 60], [false, 60], [true, 180], [false, 60],
+        [true, 60], [false, 60], [true, 60], [false, 180], [true, 60], [false, 60], [true, 180],
+        [false, 60], [true, 60], [false, 60], [true, 60], [false, 180], [true, 180], [false, 60],
+        [true, 180], [false, 60], [true, 180], [false, 420], [true, 60], [false, 60], [true, 180],
+        [false, 60], [true, 180], [false, 180], [true, 180], [false, 60], [true, 180], [false, 60],
+        [true, 180], [false, 180], [true, 60], [false, 60], [true, 180], [false, 60], [true, 60],
+        [false, 180], [true, 60], [false, 60], [true, 180], [false, 60], [true, 60], [false, 60],
+        [true, 60], [false, 180], [true, 180], [false, 60], [true, 60], [false, 60], [true, 60]
+      ],
+      "text_before_idle": "HELLO WORL",
+      "idle_probes": [],
+      "idle_text": "D ",
+      "text": "HELLO WORLD ",
+      "dit_ms": 600.0,
+      "offset_ms": 0.0,
+      "letter_count": 10,
+      "unknown_count": 0
+    },
+    {
+      "name": "lone-o-idle-flush",
+      "description": "O alone at 15 WPM, then silence: three equal marks 3x the intra gaps. The dah rule gives T = 80 ms; while runs are held back idle() waits for max(7T, 3.5 x 240) = 840 ms (840 is not > 840, 850 is).",
+      "parameters": {
+        "text": "O",
+        "wpm": 15,
+        "jitter": 0.0,
+        "offset_ms": 0.0,
+        "idle_probe_ms": [560, 840, 850, 5000]
+      },
+      "decoder": {
+        "wpm": null,
+        "adaptive": true,
+        "window": 30
+      },
+      "runs": [[true, 24], [false, 8], [true, 24], [false, 8], [true, 24]],
+      "text_before_idle": "",
+      "idle_probes": [[560, ""], [840, ""], [850, "O "], [5000, ""]],
+      "idle_text": "",
+      "text": "O ",
+      "dit_ms": 80.0,
+      "offset_ms": 0.0,
+      "letter_count": 1,
+      "unknown_count": 0
+    },
+    {
       "name": "unknown-symbol",
       "description": "Six dits in one letter (not in the table), a word gap, then S: emits '?' once and counts it in unknown_count.",
       "parameters": {
@@ -458,7 +577,7 @@
         [true, 199], [false, 374]
       ],
       "runs_from_rounded_power_db_identical": true,
-      "text": "TU "
+      "text": "X "
     }
   }
 }

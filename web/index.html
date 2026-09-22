@@ -19,7 +19,7 @@
       <h1>Beeper Morse Console</h1>
       <p>Press <b>Start</b>, allow the microphone, and key Morse on the beeper. The page measures the tone
         power every 10 ms, tracks the noise floor, and turns marks and gaps into letters. Audio never leaves
-        this computer. If Windows audio enhancements chop the signal, the desktop app below reads the raw microphone.</p>
+        this computer. Edge and Chrome open the microphone in raw mode; Firefox on Windows gets the processed signal, which removes steady tones. If the signal looks chopped, the desktop app below reads the raw microphone.</p>
     </div>
     <div class="facts mono">
       <div>Tone<b id="factTone">2491 Hz</b></div>
@@ -57,7 +57,7 @@
           <button id="wpmAuto" aria-pressed="true" type="button">Auto</button>
           <button id="wpmManual" aria-pressed="false" type="button">Manual</button>
         </div>
-        <input id="wpmVal" class="ctl mono" type="number" value="8" min="3" max="40" step="1" disabled aria-label="Words per minute">
+        <input id="wpmVal" class="ctl mono" type="number" value="8" min="2" max="40" step="1" disabled aria-label="Words per minute">
         <span class="mono unit">WPM</span>
       </div>
       <div class="spacer"></div>
@@ -73,7 +73,7 @@
     </div>
     <div class="msgbar" id="chopHint" role="status" hidden>
       <span class="icon" aria-hidden="true">!</span>
-      <span class="txt">The microphone signal looks processed. In Windows Sound settings turn off Audio enhancements for this microphone.</span>
+      <span class="txt">The microphone signal looks processed. Use Edge or Chrome, which open the microphone in raw mode, or turn off Audio enhancements for this microphone in Windows Sound settings. Firefox on Windows always gets the processed signal.</span>
       <button class="x" id="chopDismiss" aria-label="Dismiss hint" title="Dismiss">×</button>
     </div>
     <div class="msgbar note" id="noteBar" role="status" hidden>
@@ -150,9 +150,10 @@
         <div class="enc-left">
           <div class="enc-row">
             <input id="encIn" class="ctl mono" type="text" value="HELLO WORLD" placeholder="Type a message" aria-label="Message to encode" spellcheck="false" autocomplete="off">
-            <div class="field"><label for="encWpm">Speed</label><input id="encWpm" class="ctl mono" type="number" value="8" min="3" max="40" step="1" aria-label="Encoding speed in words per minute"> <span class="mono unit">WPM</span></div>
+            <div class="field"><label for="encWpm">Speed</label><input id="encWpm" class="ctl mono" type="number" value="8" min="2" max="40" step="1" aria-label="Encoding speed in words per minute"> <span class="mono unit">WPM</span></div>
             <button class="ctl" id="encPlay" title="Key the tone through this machine's speakers">Play tone</button>
             <button class="ctl" id="encCopy" title="Copy the Morse to the clipboard">Copy</button>
+            <label class="field check" title="While the decoder is listening, Play is also mixed straight into it, independent of speakers, microphone and Windows audio processing"><input type="checkbox" id="encFeed" checked> <span>Feed the decoder</span></label>
           </div>
           <div class="enc-out mono" id="encOut" aria-live="polite"></div>
           <div class="enc-guide"><canvas id="encCanvas"></canvas></div>
@@ -162,7 +163,7 @@
           <div class="ro"><span class="k">Dit · dah</span><span class="v mono" id="encDit">—</span></div>
           <div class="ro"><span class="k">Letter gap · word gap</span><span class="v mono" id="encGap">—</span></div>
           <div class="ro"><span class="k">Tone</span><span class="v mono" id="encTone">2491<small>Hz</small></span></div>
-          <div class="tip">Play keys the tone through this machine's speakers, so the decoder above can be tested without the desktop.</div>
+          <div class="tip">Play keys the tone through the speakers. With <b>Feed the decoder</b> on it is also mixed straight into the decoder while listening, so the whole chain can be tested even where the microphone is processed (Firefox on Windows).</div>
         </div>
       </div>
     </section>
@@ -197,7 +198,7 @@
     <div class="note"><span class="tag">C</span><div><h3>Decoded text and timing</h3><p>The letter being keyed builds up as dots and dashes and is committed at the next letter gap. On the right, the live estimates that drive the decoder: dit, dah, letter gap and the reverb offset, plus a histogram of recent mark lengths that should show two clusters.</p></div></div>
     <div class="note"><span class="tag">D</span><div><h3>Encode</h3><p>Type English, read the Morse. Letters are separated by a space and words by a slash. The bar underneath is the keying guide: marks and gaps drawn to scale at the chosen speed, with each letter labelled, so you can follow it while pressing the button. Play keys the tone through the speakers and runs a playhead along the guide.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
-    <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Browsers get the microphone as Windows shares it, enhancements included. If marks arrive as 10 ms fragments the page says so; turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
+    <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>
 
   <div class="foot">

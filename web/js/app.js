@@ -19,7 +19,7 @@
 import { encode, lookup } from "./table.js";
 import { ToneDetector } from "./detector.js";
 import { MorseDecoder } from "./decoder.js";
-import { TonePlayer, buildGuide, roundHalfEven } from "./player.js";
+import { TonePlayer, buildGuide, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
 
 // ------------------------------------------------------------------ constants
@@ -84,6 +84,7 @@ const el = {
   dit: $("ditV"), dah: $("dahV"), lgap: $("lgapV"), off: $("offV"),
   pill: $("statePill"), lvl: $("lvlV"), snr: $("snrV"), wpm: $("wpmV"), cnt: $("cntV"), unk: $("unkV"),
   encIn: $("encIn"), encWpm: $("encWpm"), encPlay: $("encPlay"), encCopy: $("encCopy"), encOut: $("encOut"),
+  encFeed: $("encFeed"),
   encDur: $("encDur"), encDit: $("encDit"), encGap: $("encGap"), encTone: $("encTone"),
   stateDot: $("stateDot"), stateV: $("stateV"), blockV: $("blockV"), dropV: $("dropV"), clockV: $("clockV"), rateV: $("rateV"),
   titleDev: $("titleDev"), factTone: $("factTone"), factRate: $("factRate"), factBlock: $("factBlock"),
@@ -330,6 +331,7 @@ async function startListening() {
   state.starting = false;
   state.everRan = true;
   el.pause.textContent = "Pause";
+  syncPlayerFeed(); // a tone already playing reaches the decoder from now on
   // Permission is granted now, so the device list has labels.
   await refreshDevices(el.dev.value === "" ? mic.deviceId : el.dev.value);
   if (state.f0 >= state.fs / 2) applyFrequency(DEFAULT_F0);
@@ -342,6 +344,7 @@ async function stopListening() {
   if (!mic || !state.running) return;
   state.running = false;
   state.paused = false;
+  syncPlayerFeed(); // detach the tone from the bus before the graph is torn down
   for (const run of detector.flush()) feedRun(run);
   decoder.idle(Infinity);
   finishAuto(false);
@@ -406,11 +409,12 @@ function setSpeedMode(manual) {
 }
 
 function rebuildDecoder() {
-  const wpm = clamp(parseFloat(el.wpmVal.value) || 8, 3, 40);
+  const wpm = clamp(parseFloat(el.wpmVal.value) || 8, 2, 40);
   state.wpmManual = wpm;
   el.wpmVal.value = String(wpm);
   const next = state.manual ? new MorseDecoder({ wpm, adaptive: false }) : new MorseDecoder();
   decoder.idle(Infinity); // commit the pending letter under the old rule
+  next.adoptTiming(decoder); // keep the measured speed and reverb offset (same as the desktop app)
   next.text = decoder.text;
   next.letterCount = decoder.letterCount;
   next.unknownCount = decoder.unknownCount;
@@ -1051,7 +1055,7 @@ function drawHist() {
 const encoder = { text: "", wpm: 8, guide: { timing: [], letters: [], totalMs: 0 }, playheadMs: null };
 
 function buildEncoding() {
-  const wpm = clamp(parseFloat(el.encWpm.value) || 8, 3, 40);
+  const wpm = clamp(parseFloat(el.encWpm.value) || 8, 2, 40);
   encoder.wpm = wpm;
   encoder.text = el.encIn.value;
   encoder.guide = buildGuide(encoder.text, wpm);
@@ -1092,9 +1096,10 @@ function drawEncGuide() {
   ctx.font = font(11, true);
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const minW = 9;
-  for (const L of letters) {
-    if (x(L.endMs) - x(L.startMs) >= minW) ctx.fillText(L.ch, x((L.startMs + L.endMs) / 2), 0);
+  // Every letter is labelled, however narrow (a lone dit like E); only a
+  // label that would overlap its predecessor is skipped.
+  for (const label of layoutGuideLabels(letters, x, (ch) => ctx.measureText(ch).width)) {
+    ctx.fillText(label.ch, label.x, 0);
   }
   if (player.playing && encoder.playheadMs !== null) {
     ctx.fillStyle = ink;
@@ -1110,6 +1115,7 @@ function togglePlay() {
   if (!encoder.guide.totalMs) return;
   try {
     player.audioContext = ensureContext();
+    syncPlayerFeed();
     player.play(encoder.guide.timing, state.f0, 0.15);
     encoder.playheadMs = 0;
     el.encPlay.textContent = "Stop";
@@ -1121,6 +1127,21 @@ function togglePlay() {
   }
   dirty = true;
 }
+/**
+ * Mix the encoder's tone into the decoder's input bus while listening and
+ * "Feed the decoder" is on. This is the path that works everywhere: the
+ * acoustic route (speakers, room, microphone) is broken wherever the OS
+ * removes the machine's own output from the microphone, which is what
+ * Firefox on Windows gets. Safe to call at any time; it only adds or removes
+ * a Web Audio connection.
+ */
+function syncPlayerFeed() {
+  const bus = mic && state.running ? mic.bus : null;
+  const want = Boolean(bus) && el.encFeed.checked;
+  for (const node of player.outputs) if (node !== bus || !want) player.removeOutput(node);
+  if (want) player.addOutput(bus);
+}
+
 player.onProgress = (ms) => {
   encoder.playheadMs = ms;
   dirty = true;
@@ -1256,6 +1277,7 @@ function wire() {
     buildEncoding();
   });
   el.encPlay.addEventListener("click", togglePlay);
+  el.encFeed.addEventListener("change", syncPlayerFeed);
   el.encCopy.addEventListener("click", () => {
     const done = () => {
       el.encCopy.textContent = "Copied";

@@ -20,6 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 pytest.importorskip("PySide6")
@@ -194,3 +195,44 @@ def test_build_encoding_letter_spans_match_timing() -> None:
     for (ch, start, end), (nxt_ch, nxt_start, _) in zip(enc.letters, enc.letters[1:]):
         assert end <= nxt_start
     assert [ch for ch, _, _ in enc.letters] == list("HELLOWORLD")
+
+
+# ------------------------------------------------- keying guide labels, feed
+
+
+def test_keying_guide_labels_every_letter_including_e() -> None:
+    # "HELLO WORLD!" at 8 WPM in an 800 px guide: the E is a single 150 ms dit
+    # about 6 px wide, and a minimum-width gate used to drop its label.
+    enc = ui.build_encoding("HELLO WORLD!", 8.0)
+    scale = 800.0 / enc.total_ms
+    placed = ui.layout_guide_labels(enc.letters, lambda ms: ms * scale, lambda ch: 7.0)
+    assert [ch for ch, _ in placed] == list("HELLOWORLD!")
+    xs = [x for _, x in placed]
+    assert xs == sorted(xs)
+    assert all(b - a >= 7.0 + 3.0 for a, b in zip(xs, xs[1:])), "labels never overlap"
+
+
+def test_keying_guide_skips_only_colliding_labels_when_squeezed() -> None:
+    enc = ui.build_encoding("HELLO WORLD!", 8.0)
+    scale = 60.0 / enc.total_ms
+    placed = ui.layout_guide_labels(enc.letters, lambda ms: ms * scale, lambda ch: 7.0)
+    assert 0 < len(placed) < len(enc.letters)
+    assert placed[0][0] == "H"
+    xs = [x for _, x in placed]
+    assert all(b - a >= 10.0 for a, b in zip(xs, xs[1:]))
+
+
+def test_feed_the_decoder_mixes_the_tone_into_the_pipeline(qapp, window: ui.MainWindow) -> None:
+    # Software loopback: the rendered tone is added to the input blocks, so a
+    # silent microphone still decodes what Play keys.
+    assert window.feed_check.isChecked()
+    enc = ui.build_encoding("SOS", 12.0)
+    tone = ui.render_tone(enc.timing, window.pipeline.f0, fs=ui.DEFAULT_FS)
+    window._inject = np.concatenate([np.zeros(ui.DEFAULT_FS // 2, dtype=np.float32), tone])
+    window._inject_pos = 0
+    block = window.pipeline.block_size
+    silence = np.zeros(block, dtype=np.float32)
+    for _ in range(window._inject.size // block + 200):  # the tone, then 2 s of silence
+        window._process_block(silence)
+    assert window._inject is None, "injection ends on its own"
+    assert window.pipeline.text.strip().endswith("SOS")

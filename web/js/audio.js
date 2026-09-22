@@ -211,6 +211,14 @@ export class MicInput {
     this.source = null;
     /** @type {GainNode | null} */
     this.mute = null;
+    /**
+     * Input bus feeding the worklet and both analysers.  The microphone is
+     * connected to it; `TonePlayer.addOutput(mic.bus)` mixes the encoder's
+     * tone in as well, so Play reaches the decoder even where the OS strips
+     * the machine's own output from the microphone (Firefox on Windows).
+     * @type {GainNode | null}
+     */
+    this.bus = null;
     /** @type {string} label of the track actually opened ("" until started) */
     this.deviceLabel = "";
     /** @type {string} deviceId of the track actually opened ("" until started) */
@@ -344,17 +352,21 @@ export class MicInput {
       const mute = ac.createGain();
       mute.gain.value = 0;
 
-      source.connect(node);
+      const bus = ac.createGain();
+      bus.gain.value = 1;
+      source.connect(bus);
+      bus.connect(node);
       node.connect(mute);
-      source.connect(analyser);
+      bus.connect(analyser);
       analyser.connect(mute);
-      source.connect(filtered);
+      bus.connect(filtered);
       filtered.connect(waveAnalyser);
       waveAnalyser.connect(mute);
       mute.connect(ac.destination);
 
       this.stream = stream;
       this.source = source;
+      this.bus = bus;
       this.node = node;
       this.analyser = analyser;
       this.filtered = filtered;
@@ -384,9 +396,10 @@ export class MicInput {
     } catch {
       /* the worklet did not answer; keep whatever we had */
     }
-    const { stream, source, node, analyser, filtered, waveAnalyser, mute } = this;
+    const { stream, source, bus, node, analyser, filtered, waveAnalyser, mute } = this;
     this.stream = null;
     this.source = null;
+    this.bus = null;
     this.node = null;
     this.analyser = null;
     this.filtered = null;
@@ -396,7 +409,7 @@ export class MicInput {
       node.port.onmessage = null;
       node.onprocessorerror = null;
     }
-    for (const n of [source, node, analyser, filtered, waveAnalyser, mute]) {
+    for (const n of [source, bus, node, analyser, filtered, waveAnalyser, mute]) {
       if (!n) continue;
       try {
         n.disconnect();
