@@ -32,7 +32,8 @@ import numpy as np
 
 from morse.table import MORSE_TABLE
 
-__all__ = ["Timing", "TonePlayer", "build_timing", "farnsworth_gaps", "render_tone"]
+__all__ = ["MIC_GATE_GAIN", "MIC_GATE_TAIL_MS", "MicGate", "Timing", "TonePlayer", "build_timing",
+           "farnsworth_gaps", "render_tone"]
 
 Timing = list[tuple[bool, float]]
 """A keying sequence: ``(on, duration_ms)`` pairs, marks ``True``, gaps ``False``."""
@@ -188,6 +189,63 @@ def render_tone(
     t = np.arange(n) / float(fs_i)
     signal = amp * env * np.sin(2.0 * np.pi * f0_v * t)
     return signal.astype(np.float32)
+
+
+# ----------------------------------------------------------------- mic gate
+
+MIC_GATE_GAIN = 0.01
+"""Microphone gain (-40 dB) in the decoder's input while the app's own sound is fed to the decoder."""
+MIC_GATE_TAIL_MS = 400.0
+"""How long the microphone stays turned down after the app's sound stops, for the acoustic echo to die."""
+
+
+class MicGate:
+    """Decides when the microphone is turned down in the decoder's input.
+
+    With "Feed the decoder" on, the app's own sound (Play, the hand key) is
+    mixed straight into the decoder. A raw microphone hears the same sound
+    from the speakers 30 to 150 ms later, and the two copies together fill the
+    gaps between marks. So while the app is sounding, and for
+    :data:`MIC_GATE_TAIL_MS` afterwards, the microphone is attenuated by
+    :data:`MIC_GATE_GAIN` and the decoder effectively hears the feed alone. At
+    every other moment the microphone passes untouched, so an external beeper,
+    or a recording of the speakers played back later, decodes as usual. The
+    same class exists in ``web/js/audio.js``.
+
+    ``update(sounding, now_ms)`` is called once per block (or per event) with
+    whether the app is sounding right now and the caller's clock; it returns
+    whether the microphone should be attenuated for that moment.
+    """
+
+    def __init__(self, tail_ms: float = MIC_GATE_TAIL_MS) -> None:
+        tail = float(tail_ms)
+        if not (math.isfinite(tail) and tail >= 0.0):
+            raise ValueError(f"tail_ms must be a non-negative number, got {tail_ms!r}")
+        self.tail_ms: float = tail
+        self._until: float | None = None
+
+    def update(self, sounding: bool, now_ms: float) -> bool:
+        """Record the state at ``now_ms``; True when the microphone should be attenuated."""
+        now = float(now_ms)
+        if sounding:
+            self._until = now + self.tail_ms
+            return True
+        if self._until is not None and now < self._until:
+            return True
+        self._until = None
+        return False
+
+    @property
+    def active(self) -> bool:
+        """Whether the last :meth:`update` asked for attenuation."""
+        return self._until is not None
+
+    def reset(self) -> None:
+        """Forget any tail in progress: the microphone passes at once."""
+        self._until = None
+
+    def __repr__(self) -> str:
+        return f"MicGate(tail_ms={self.tail_ms:g}, active={self.active})"
 
 
 # ----------------------------------------------------------------- playback

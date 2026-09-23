@@ -58,7 +58,7 @@ from morse import bindings as keybind
 from morse import practice
 from morse.keyer import DAH_RATIO_RANGE, WEIGHT_RANGE, Keyer, LiveKey
 from morse.runs import Run
-from morse.player import TonePlayer, build_timing, farnsworth_gaps, render_tone
+from morse.player import MIC_GATE_GAIN, MIC_GATE_TAIL_MS, MicGate, TonePlayer, build_timing, farnsworth_gaps, render_tone
 
 __all__ = [
     "DARK",
@@ -974,6 +974,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # and microphone); ``_inject_pos`` is the next sample to mix.
         self._inject: np.ndarray | None = None
         self._inject_pos: int = 0
+        # While the app's own sound is fed to the decoder (and for a tail
+        # after), the microphone is turned down in the decoder's input so the
+        # speaker echo cannot fill the gaps between marks.
+        self._mic_gate = MicGate()
         # The hand key (section E): a straight key on Space or the button, or
         # two paddles on the arrow keys. The output stream opens on first use.
         self._iambic: str = load_iambic(self.settings)
@@ -2123,6 +2127,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _process_block(self, block: np.ndarray) -> float:
         """Run one block through the pipeline and the history buffers; returns its level."""
+        block = self._gate_mic(block)
         block = self._key_feed(self._mix_injected(block))
         result = self.pipeline.process_block(block)
         self._last = result
@@ -2801,6 +2806,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if shown:
             html_text += f' <span style="color:{self.theme.ink3}">{html.escape(shown)}</span>'
         self.sent_output.setText(html_text or " ")
+
+    def _page_sounding(self) -> bool:
+        """Whether Play or the hand key is producing sound right now."""
+        lk = self._livekey
+        return self._inject is not None or bool(lk is not None and lk.running and lk.is_on())
+
+    def _gate_mic(self, block: np.ndarray) -> np.ndarray:
+        """Turn the microphone down while the app's own sound is fed to the decoder (plus a tail)."""
+        if not self.feed_check.isChecked():
+            self._mic_gate.reset()
+            return block
+        if self._mic_gate.update(self._page_sounding(), self.pipeline.elapsed_ms):
+            return np.asarray(block, dtype=np.float32) * MIC_GATE_GAIN
+        return block
 
     def _key_feed(self, block: np.ndarray) -> np.ndarray:
         """Mix the hand key's tone into an input block while Feed the decoder is on."""

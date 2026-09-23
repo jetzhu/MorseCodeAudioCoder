@@ -20,7 +20,7 @@ import { encode, lookup } from "./table.js";
 import { ToneDetector, isTonal } from "./detector.js";
 import { MorseDecoder } from "./decoder.js";
 import { TonePlayer, buildGuide, farnsworthGaps, layoutGuideLabels, roundHalfEven } from "./player.js";
-import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
+import { MIC_GATE_TAIL_MS, MicGate, MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
 import { Keyer, LiveKey } from "./keyer.js";
 import { DecodedLog, defaultFilename } from "./declog.js";
 import { DEFAULTS as BINDING_DEFAULTS, RESERVED_CODES, actionFor, isDefault as bindingsAreDefault, keyLabel, rebind, sanitize as sanitizeBindings } from "./bindings.js";
@@ -1183,6 +1183,7 @@ function togglePlay() {
     player.play(encoder.guide.timing, state.f0, 0.15);
     encoder.playheadMs = 0;
     el.encPlay.textContent = "Stop";
+    updateMicGate();
   } catch {
     el.encPlay.textContent = "Audio unavailable";
     setTimeout(() => {
@@ -1206,6 +1207,38 @@ function syncPlayerFeed() {
     for (const node of source.outputs) if (node !== bus || !want) source.removeOutput(node);
     if (want) source.addOutput(bus);
   }
+  updateMicGate();
+}
+
+/**
+ * The microphone is turned down in the decoder's input while the page's own
+ * sound is fed to the decoder, and for a short tail after it stops, so the
+ * speaker echo a raw microphone hears cannot fill the gaps between marks.
+ * Re-evaluated on every player and key event and, while active, on a timer,
+ * so the tail always starts from the true end of the sound.
+ */
+const micGate = new MicGate();
+/** @type {ReturnType<typeof setTimeout> | null} */
+let micGateTimer = null;
+
+function pageSounding() {
+  return player.playing || (liveKey.running && liveKey.isOn());
+}
+
+function updateMicGate() {
+  if (micGateTimer !== null) {
+    clearTimeout(micGateTimer);
+    micGateTimer = null;
+  }
+  if (!mic || !state.running || !el.encFeed.checked) {
+    micGate.reset();
+    if (mic) mic.setGate(false);
+    return;
+  }
+  const sounding = pageSounding();
+  const attenuate = micGate.update(sounding, mic.context.currentTime * 1000);
+  mic.setGate(attenuate);
+  if (attenuate) micGateTimer = setTimeout(updateMicGate, sounding ? 100 : MIC_GATE_TAIL_MS + 20);
 }
 
 player.onProgress = (ms) => {
@@ -1215,6 +1248,7 @@ player.onProgress = (ms) => {
 player.onEnd = () => {
   encoder.playheadMs = null;
   el.encPlay.textContent = "Play tone";
+  updateMicGate();
   dirty = true;
 };
 
@@ -1224,6 +1258,7 @@ player.onEnd = () => {
 const keyer = new Keyer(1200 / 8, "straight");
 const liveKey = new LiveKey(keyer, { gain: 0.15 });
 liveKey.onChange = () => {
+  updateMicGate();
   dirty = true;
 };
 /** Local reading of what the operator keyed, independent of the decoder above. */

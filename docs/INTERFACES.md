@@ -491,6 +491,19 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Mic gate (2026-09-23, v0.1.10): `MicGate` in `morse/player.py` and
+  `web/js/audio.js` (`update(sounding, now_ms) -> bool`, `active`, `reset`,
+  tail `MIC_GATE_TAIL_MS` 400 ms, gain `MIC_GATE_GAIN` 0.01). With Feed on
+  and the decoder listening, the microphone is attenuated 40 dB in the
+  decoder's input while Play or the hand key sounds and for the tail after,
+  so a raw microphone's delayed echo of the speakers cannot fill the gaps
+  between marks; the speakers still play the beeper frequency, and outside
+  those moments the microphone passes untouched (external beepers and
+  recordings of the speakers decode as before). Web: a `gate` GainNode
+  between the microphone source and the bus (`MicInput.setGate`), driven by
+  `updateMicGate()` on player and key events and a timer; desktop:
+  `_gate_mic` in `_process_block` on the pipeline's audio clock. With Feed
+  off the gate never engages.
 - Encode layout (2026-09-22): the message box has a full-width line of its
   own (`.enc-msg`) and the controls wrap on the line below, so a long message
   stays readable and clickable at any width. The decoded row is

@@ -583,3 +583,38 @@ def test_keyer_preference_loaders_survive_garbage(tmp_path: Path) -> None:
     s.setValue(ui.SETTINGS_RATIO, 4.25)
     s.setValue(ui.SETTINGS_WEIGHT, "30")
     assert (ui.load_iambic(s), ui.load_dah_ratio(s), ui.load_weight(s)) == ("B", 4.2, 30)
+
+
+def test_microphone_is_turned_down_while_the_page_sounds_with_feed_on(qapp, window: ui.MainWindow) -> None:
+    # A raw microphone hears the speakers a little late; while Play is fed to
+    # the decoder the microphone is attenuated, and for 400 ms after, so the
+    # echo cannot fill the gaps. With Feed off nothing is touched.
+    fs, block = window.pipeline.fs, window.pipeline.block_size
+    t = np.arange(block) / fs
+    mic = (0.5 * np.sin(2 * np.pi * window.pipeline.f0 * t)).astype(np.float32)
+
+    def mixed_peak() -> float:
+        return float(np.max(np.abs(window._raw.last(block))))
+
+    assert window.feed_check.isChecked()
+    window._process_block(mic)
+    assert mixed_peak() == pytest.approx(0.5, abs=0.01), "nothing sounding: the microphone passes"
+    window._inject = np.zeros(block * 3, dtype=np.float32)  # Play running (silent frames, so only the gate shows)
+    window._inject_pos = 0
+    for _ in range(3):
+        window._process_block(mic)
+        assert mixed_peak() == pytest.approx(0.5 * ui.MIC_GATE_GAIN, abs=0.001)
+    assert window._inject is None, "the tone is used up"
+    tail_blocks = int(round(ui.MIC_GATE_TAIL_MS / window.pipeline.block_ms))
+    for _ in range(tail_blocks - 1):
+        window._process_block(mic)
+        assert mixed_peak() == pytest.approx(0.5 * ui.MIC_GATE_GAIN, abs=0.001), "still inside the tail"
+    window._process_block(mic)
+    assert mixed_peak() == pytest.approx(0.5, abs=0.01), "tail over: the microphone is back"
+    # Feed off: the gate never engages, even while the tone plays.
+    window.feed_check.setChecked(False)
+    window._inject = np.zeros(block * 2, dtype=np.float32)
+    window._inject_pos = 0
+    window._process_block(mic)
+    assert mixed_peak() == pytest.approx(0.5, abs=0.01)
+    window.feed_check.setChecked(True)

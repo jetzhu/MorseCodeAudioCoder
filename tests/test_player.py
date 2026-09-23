@@ -613,3 +613,33 @@ def test_beep_sender_farnsworth_matches_the_player() -> None:
     bs = _load_beep_sender()
     for text, wpm, farns in [("HELLO WORLD", 18, 5), ("PARIS", 13, 8), ("E E", 20, 10), ("SOS", 10, 12)]:
         assert bs.build_timing(text, wpm, farns) == [(on, int(ms)) for on, ms in build_timing(text, wpm, farns)]
+
+
+# -------------------------------------------------------------- MicGate
+
+
+def test_mic_gate_attenuates_while_sounding_and_for_the_tail() -> None:
+    from morse.player import MIC_GATE_GAIN, MIC_GATE_TAIL_MS, MicGate
+
+    assert MIC_GATE_GAIN == 0.01 and MIC_GATE_TAIL_MS == 400.0
+    g = MicGate()
+    assert g.active is False
+    assert g.update(False, 0.0) is False
+    assert g.update(True, 1000.0) is True
+    assert g.active is True
+    assert g.update(False, 1399.0) is True, "the tail keeps the microphone down"
+    assert g.update(False, 1400.0) is False, "tail over"
+    assert g.active is False
+    g.update(True, 2000.0)
+    g.update(False, 2300.0)
+    assert g.update(True, 2350.0) is True, "sound again inside the tail: a new tail starts"
+    assert g.update(False, 2740.0) is True
+    assert g.update(False, 2750.0) is False
+    g.update(True, 3000.0)
+    g.reset()
+    assert g.active is False and g.update(False, 3001.0) is False
+    short = MicGate(tail_ms=0)
+    assert short.update(True, 0.0) is True and short.update(False, 0.0) is False
+    with pytest.raises(ValueError):
+        MicGate(tail_ms=-1)
+    assert "MicGate(" in repr(g)

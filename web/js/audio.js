@@ -77,6 +77,54 @@ export function support() {
 /** The two ways the page can ask for the microphone. */
 export const PROCESSING_MODES = ["raw", "browser"];
 
+/** Microphone gain (-40 dB) in the decoder's input while the page's own sound is fed to the decoder. */
+export const MIC_GATE_GAIN = 0.01;
+/** How long the microphone stays turned down after the page's sound stops, for the acoustic echo to die. */
+export const MIC_GATE_TAIL_MS = 400;
+
+/**
+ * Decides when the microphone is turned down in the decoder's input (mirror
+ * of `morse.player.MicGate`). With Feed the decoder on, the page's own sound
+ * (Play, the hand key) is mixed straight into the decoder; a raw microphone
+ * hears the same sound from the speakers 30 to 150 ms later, and the two
+ * copies together fill the gaps between marks. So while the page is sounding,
+ * and for `MIC_GATE_TAIL_MS` afterwards, the microphone is attenuated by
+ * `MIC_GATE_GAIN` and the decoder effectively hears the feed alone. At every
+ * other moment the microphone passes untouched, so an external beeper, or a
+ * recording of the speakers played back later, decodes as usual.
+ */
+export class MicGate {
+  /** @param {number} [tailMs] */
+  constructor(tailMs = MIC_GATE_TAIL_MS) {
+    if (!(Number.isFinite(tailMs) && tailMs >= 0)) throw new RangeError(`tailMs must be a non-negative number, got ${tailMs}`);
+    this.tailMs = tailMs;
+    /** @type {number | null} */
+    this._until = null;
+  }
+
+  /** Record the state at `nowMs`; true when the microphone should be attenuated. @param {boolean} sounding @param {number} nowMs */
+  update(sounding, nowMs) {
+    const now = Number(nowMs);
+    if (sounding) {
+      this._until = now + this.tailMs;
+      return true;
+    }
+    if (this._until !== null && now < this._until) return true;
+    this._until = null;
+    return false;
+  }
+
+  /** Whether the last `update` asked for attenuation. */
+  get active() {
+    return this._until !== null;
+  }
+
+  /** Forget any tail in progress: the microphone passes at once. */
+  reset() {
+    this._until = null;
+  }
+}
+
 /**
  * The `getUserMedia` constraints: mono, and in `"raw"` mode (the contract's
  * default) the browser's echo cancellation, noise suppression and automatic
@@ -236,6 +284,10 @@ export class MicInput {
     this.source = null;
     /** @type {GainNode | null} */
     this.mute = null;
+    /** @type {GainNode | null} the microphone's own gain into the bus (see `setGate`) */
+    this.gate = null;
+    /** @type {boolean} whether the microphone is currently turned down by `setGate` */
+    this.gated = false;
     /**
      * Input bus feeding the worklet and both analysers.  The microphone is
      * connected to it; `TonePlayer.addOutput(mic.bus)` mixes the encoder's
@@ -305,6 +357,21 @@ export class MicInput {
   /** Block length in milliseconds (10 ms up to rounding). */
   get blockMs() {
     return (1000 * this.blockSize) / this.context.sampleRate;
+  }
+
+  /**
+   * Turn the microphone down to `MIC_GATE_GAIN` in the bus (or back to full
+   * level) with a 10 ms edge. Only the microphone is affected; the tone the
+   * page mixes into the bus keeps its level. No-op while not running.
+   * @param {boolean} active
+   */
+  setGate(active) {
+    const on = Boolean(active);
+    if (on === this.gated) return;
+    this.gated = on;
+    if (this.gate && this.context) {
+      this.gate.gain.setTargetAtTime(on ? MIC_GATE_GAIN : 1, this.context.currentTime, 0.01);
+    }
   }
 
   /**
@@ -382,7 +449,13 @@ export class MicInput {
 
       const bus = ac.createGain();
       bus.gain.value = 1;
-      source.connect(bus);
+      // The microphone reaches the bus through its own gain, so it can be
+      // turned down while the page's own sound is fed to the decoder (setGate)
+      // without touching what TonePlayer and LiveKey mix into the bus.
+      const gate = ac.createGain();
+      gate.gain.value = 1;
+      source.connect(gate);
+      gate.connect(bus);
       bus.connect(node);
       node.connect(mute);
       bus.connect(analyser);
@@ -394,6 +467,8 @@ export class MicInput {
 
       this.stream = stream;
       this.source = source;
+      this.gate = gate;
+      this.gated = false;
       this.bus = bus;
       this.node = node;
       this.analyser = analyser;
@@ -424,9 +499,11 @@ export class MicInput {
     } catch {
       /* the worklet did not answer; keep whatever we had */
     }
-    const { stream, source, bus, node, analyser, filtered, waveAnalyser, mute } = this;
+    const { stream, source, gate, bus, node, analyser, filtered, waveAnalyser, mute } = this;
     this.stream = null;
     this.source = null;
+    this.gate = null;
+    this.gated = false;
     this.bus = null;
     this.node = null;
     this.analyser = null;
@@ -437,7 +514,7 @@ export class MicInput {
       node.port.onmessage = null;
       node.onprocessorerror = null;
     }
-    for (const n of [source, bus, node, analyser, filtered, waveAnalyser, mute]) {
+    for (const n of [source, gate, bus, node, analyser, filtered, waveAnalyser, mute]) {
       if (!n) continue;
       try {
         n.disconnect();

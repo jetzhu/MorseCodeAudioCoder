@@ -296,6 +296,9 @@ registry shows seven audio-enhancement processors active on the array with
 1. Use Edge or Chrome, which open the microphone in raw mode. (Since
    2026-09-22 the page also offers Mic: Browser default, which leaves the
    processing constraints to the browser, as an alternative path to try.)
+   With a raw microphone and Feed on, the speaker echo used to add to the
+   feed 30 to 150 ms late and fill the gaps; since v0.1.10 the microphone is
+   turned down in the decoder's input while the app sounds (MicGate).
 2. In Windows Settings, Sound, Input, Microphone Array: turn Audio
    enhancements off. Re-run `tools/probe/probe_loopback.py 1` to confirm the
    processed path then passes the tone cleanly.
