@@ -136,6 +136,7 @@ a { color: var(--spec); }
 }
 .ctl.mono { width: 88px; text-align: right; }
 select.ctl { min-width: 250px; max-width: 360px; }
+select.ctl.narrow { min-width: 150px; max-width: 200px; }
 button.ctl { cursor: pointer; padding: 0 12px; }
 button.ctl:hover:not(:disabled) { border-color: var(--ink-3); }
 button.ctl:disabled { opacity: 0.5; cursor: default; }

@@ -152,7 +152,7 @@
       <h1>Beeper Morse Console</h1>
       <p>Press <b>Start</b>, allow the microphone, and key Morse on the beeper. The page measures the tone
         power every 10 ms, tracks the noise floor, and turns marks and gaps into letters. Audio never leaves
-        this computer. Edge and Chrome open the microphone in raw mode; Firefox on Windows gets the processed signal, which removes steady tones. If the signal looks chopped, the desktop app below reads the raw microphone.</p>
+        this computer. Edge and Chrome open the microphone in raw mode, past the driver's enhancements. If the tone looks chopped or missing (Firefox on Windows often gets a processed signal), switch <b>Mic</b> to Browser default, turn off Audio enhancements for the microphone in Windows Sound settings, or use the desktop app below, which reads the raw microphone.</p>
     </div>
     <div class="facts mono">
       <div>Tone<b id="factTone">2491 Hz</b></div>
@@ -176,6 +176,13 @@
         <label for="dev">Input</label>
         <select id="dev" class="ctl" aria-label="Input device">
           <option value="">Default microphone</option>
+        </select>
+      </div>
+      <div class="field" title="Raw asks the browser to turn echo cancellation, noise suppression and gain control off (Edge and Chrome then bypass the driver's enhancements too). Browser default leaves them to the browser: try it if Raw yields nothing.">
+        <label for="micProc">Mic</label>
+        <select id="micProc" class="ctl narrow" aria-label="Microphone processing">
+          <option value="raw">Raw (processing off)</option>
+          <option value="browser">Browser default</option>
         </select>
       </div>
       <div class="field">
@@ -207,7 +214,7 @@
     </div>
     <div class="msgbar" id="chopHint" role="status" hidden>
       <span class="icon" aria-hidden="true">!</span>
-      <span class="txt">The microphone signal looks processed. Use Edge or Chrome, which open the microphone in raw mode, or turn off Audio enhancements for this microphone in Windows Sound settings. Firefox on Windows always gets the processed signal.</span>
+      <span class="txt">The microphone signal looks processed. Try <b>Mic: Browser default</b> in the toolbar, use Edge or Chrome, which open the microphone in raw mode, or turn off Audio enhancements for this microphone in Windows Sound settings.</span>
       <button class="x" id="chopDismiss" aria-label="Dismiss hint" title="Dismiss">×</button>
     </div>
     <div class="msgbar note" id="noteBar" role="status" hidden>

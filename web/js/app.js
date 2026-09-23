@@ -46,7 +46,7 @@ const AUTO_MIN_PROMINENCE_DB = 10;
 const RELEASES_API = "https://api.github.com/repos/jetzhu/MorseCodeAudioCoder/releases/latest";
 const RELEASES_PAGE = "https://github.com/jetzhu/MorseCodeAudioCoder/releases";
 const REPO_GIT = "https://github.com/jetzhu/MorseCodeAudioCoder.git";
-const STORAGE = { device: "morse.deviceId", f0: "morse.f0" };
+const STORAGE = { device: "morse.deviceId", f0: "morse.f0", micProc: "morse.micProcessing" };
 
 // -------------------------------------------------------------------- helpers
 
@@ -78,7 +78,7 @@ const store = {
 // ---------------------------------------------------------------------- state
 
 const el = {
-  start: $("startBtn"), dev: $("dev"), f0: $("f0"), auto: $("autoBtn"),
+  start: $("startBtn"), dev: $("dev"), micProc: $("micProc"), f0: $("f0"), auto: $("autoBtn"),
   wpmAuto: $("wpmAuto"), wpmManual: $("wpmManual"), wpmVal: $("wpmVal"),
   pause: $("pauseBtn"), save: $("saveBtn"), log: $("logBtn"), clear: $("clearBtn"),
   msgBar: $("msgBar"), msgText: $("msgText"), msgDismiss: $("msgDismiss"),
@@ -127,6 +127,7 @@ const state = {
   peakHold: -120,
   peakHoldAge: 0,
   deviceLabel: "",
+  micProcessing: "unknown", // what the browser reported applying to the open microphone
   /** @type {number[]} */
   recentMarks: [],
   // raw-verdict bookkeeping for the chopped-signal hint
@@ -337,7 +338,7 @@ async function startListening() {
       stopListening();
     };
     mic.setFrequency(state.f0);
-    await mic.start(el.dev.value, onBlock);
+    await mic.start(el.dev.value, onBlock, { processing: el.micProc.value === "browser" ? "browser" : "raw" });
   } catch (err) {
     state.starting = false;
     showMessage(describeCaptureError(err));
@@ -349,6 +350,7 @@ async function startListening() {
   state.blockSize = mic.blockSize;
   state.blockMs = mic.blockMs;
   state.deviceLabel = mic.deviceLabel;
+  state.micProcessing = mic.appliedProcessing;
   detector = new ToneDetector({ blockMs: state.blockMs });
   resetStreamState();
   state.running = true;
@@ -383,6 +385,13 @@ async function stopListening() {
 async function restartListening() {
   await stopListening();
   await startListening();
+}
+
+/** " · raw" or " · processed" once the browser has told us, else nothing. */
+function micProcessingText() {
+  if (state.micProcessing === "raw") return " · raw";
+  if (state.micProcessing === "processed") return " · processed";
+  return "";
 }
 
 // ---------------------------------------------------------------- controls
@@ -579,7 +588,7 @@ function updateStatus() {
     el.factBlock.textContent = `${state.blockSize} samples`;
     el.specInfo.textContent = `0–8 kHz · 2048-point FFT · ${((2048 / state.fs) * 1000).toFixed(0)} ms`;
     el.titleDev.textContent = state.running || state.everRan
-      ? `${state.deviceLabel || "Default microphone"} · ${khz} kHz${state.running ? "" : " · closed"}`
+      ? `${state.deviceLabel || "Default microphone"} · ${khz} kHz${micProcessingText()}${state.running ? "" : " · closed"}`
       : "microphone closed";
   } else {
     el.blockV.textContent = "10 ms blocks";
@@ -1657,6 +1666,13 @@ function wire() {
   });
   el.dev.addEventListener("change", () => {
     store.set(STORAGE.device, el.dev.value);
+    state.chopDismissed = false;
+    if (state.running) restartListening();
+  });
+  const storedProc = store.get(STORAGE.micProc);
+  if (storedProc === "browser" || storedProc === "raw") el.micProc.value = storedProc;
+  el.micProc.addEventListener("change", () => {
+    store.set(STORAGE.micProc, el.micProc.value);
     state.chopDismissed = false;
     if (state.running) restartListening();
   });

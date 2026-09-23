@@ -74,24 +74,49 @@ export function support() {
   return { ok: secure && getUserMedia && audioWorklet, getUserMedia, audioWorklet, secure, reason };
 }
 
+/** The two ways the page can ask for the microphone. */
+export const PROCESSING_MODES = ["raw", "browser"];
+
 /**
- * The `getUserMedia` constraints the contract prescribes: mono, with the
- * browser's echo cancellation, noise suppression and automatic gain control
- * all off so the tone reaches the decoder as the driver delivers it.
+ * The `getUserMedia` constraints: mono, and in `"raw"` mode (the contract's
+ * default) the browser's echo cancellation, noise suppression and automatic
+ * gain control all off so the tone reaches the decoder as the driver delivers
+ * it; Chromium then also opens the device in Windows raw mode, past the
+ * driver's enhancements. `"browser"` mode leaves those three constraints out
+ * so the browser applies its defaults: a different capture path to try where
+ * raw mode yields nothing (some Firefox on Windows setups).
  *
  * @param {string} [deviceId] `""`/undefined for the browser's default input
+ * @param {"raw" | "browser"} [processing="raw"]
  * @returns {MediaStreamConstraints}
+ * @throws {RangeError} for an unknown processing mode
  */
-export function captureConstraints(deviceId) {
+export function captureConstraints(deviceId, processing = "raw") {
+  if (!PROCESSING_MODES.includes(processing)) throw new RangeError(`processing must be "raw" or "browser", got ${processing}`);
   /** @type {MediaTrackConstraints} */
-  const audio = {
-    echoCancellation: false,
-    noiseSuppression: false,
-    autoGainControl: false,
-    channelCount: 1,
-  };
+  const audio = { channelCount: 1 };
+  if (processing === "raw") {
+    audio.echoCancellation = false;
+    audio.noiseSuppression = false;
+    audio.autoGainControl = false;
+  }
   if (deviceId) audio.deviceId = deviceId;
   return { audio };
+}
+
+/**
+ * What the browser says it applied to a track, from `getSettings()`:
+ * `"raw"` when echo cancellation, noise suppression and gain control are all
+ * reported off, `"processed"` when any is on, `"unknown"` when the browser
+ * does not report them.
+ * @param {MediaTrackSettings | null | undefined} settings
+ * @returns {"raw" | "processed" | "unknown"}
+ */
+export function describeProcessing(settings) {
+  if (!settings) return "unknown";
+  const flags = [settings.echoCancellation, settings.noiseSuppression, settings.autoGainControl];
+  if (flags.every((f) => typeof f !== "boolean")) return "unknown";
+  return flags.some((f) => f === true) ? "processed" : "raw";
 }
 
 /**
@@ -223,6 +248,8 @@ export class MicInput {
     this.deviceLabel = "";
     /** @type {string} deviceId of the track actually opened ("" until started) */
     this.deviceId = "";
+    /** @type {"raw" | "processed" | "unknown"} what the browser reports it applied to the open track */
+    this.appliedProcessing = "unknown";
     /** @type {Float32Array | null} the ring buffer as it was when `stop()` ran */
     this.lastDump = null;
     /** @type {number} sample rate of `lastDump` */
@@ -292,7 +319,7 @@ export class MicInput {
    * @param {(block: BlockMessage) => void} onBlock called once per 10 ms block
    * @returns {Promise<void>}
    */
-  async start(deviceId, onBlock) {
+  async start(deviceId, onBlock, { processing = "raw" } = {}) {
     if (this._running) await this.stop();
     const ac = this.context;
     if (ac.state === "suspended" && typeof ac.resume === "function") {
@@ -305,7 +332,7 @@ export class MicInput {
     this.onBlock = onBlock || null;
 
     const nav = /** @type {any} */ (globalThis).navigator;
-    const stream = await nav.mediaDevices.getUserMedia(captureConstraints(deviceId));
+    const stream = await nav.mediaDevices.getUserMedia(captureConstraints(deviceId, processing));
     try {
       if (!this._moduleLoaded) {
         await ac.audioWorklet.addModule(String(this.workletUrl));
@@ -315,6 +342,7 @@ export class MicInput {
       this.deviceLabel = track ? track.label || "" : "";
       const settings = track && typeof track.getSettings === "function" ? track.getSettings() : {};
       this.deviceId = (settings && settings.deviceId) || deviceId || "";
+      this.appliedProcessing = describeProcessing(settings);
       if (track) {
         track.onended = () => {
           if (this._running && typeof this.onEnded === "function") this.onEnded();

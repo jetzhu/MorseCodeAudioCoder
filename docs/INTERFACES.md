@@ -457,7 +457,14 @@ web/test/*.test.mjs       node --test: table, dsp, detector, decoder parity agai
 Behavioural requirements
 
 - Listening starts from a Start button click. `getUserMedia` constraints:
-  `{ audio: { deviceId, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } }`.
+  `{ audio: { deviceId, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } }`
+  (the `Mic: Raw` default, 2026-09-22). `Mic: Browser default` leaves the three
+  processing constraints out so the browser applies its own defaults, a
+  different capture path for setups where raw yields nothing (some Firefox on
+  Windows machines); the choice is kept in localStorage `morse.micProcessing`
+  and changing it while listening reopens the microphone. The status bar shows
+  what the browser reports having applied (`track.getSettings()`): `raw`,
+  `processed`, or nothing when it does not say.
   Show the actual sample rate and block size in the status bar.
 - Device picker lists inputs from `enumerateDevices()`; labels fill in after
   permission is granted. Remember the last device in `localStorage`, wrapped in try/catch.
