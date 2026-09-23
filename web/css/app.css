@@ -169,7 +169,7 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 .msgbar.note { background: var(--panel-2); }
 
 .body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
-.main { display: grid; grid-template-rows: 212px 232px 168px; border-right: 1px solid var(--line); min-width: 0; }
+.main { display: grid; grid-template-rows: 212px 232px minmax(168px, auto); border-right: 1px solid var(--line); min-width: 0; }
 .panel { position: relative; border-bottom: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; }
 .panel:last-child { border-bottom: 0; }
 .panel header {
@@ -211,8 +211,10 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 .rail .block { padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .rail .block:last-child { border-bottom: 0; }
 .rail h4 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; }
-.meter { display: grid; grid-template-columns: 26px 1fr; gap: 10px; height: 150px; }
-.meter canvas { width: 100%; height: 100%; display: block; }
+.meter { display: grid; grid-template-columns: 26px 1fr; gap: 10px; height: 150px; position: relative; }
+/* Absolutely positioned like the other canvases: a canvas sized from its own
+   clientHeight inside an auto grid row would otherwise grow on every resize. */
+.meter canvas { position: absolute; top: 0; bottom: 0; left: 36px; right: 0; width: auto; height: auto; display: block; }
 .meter .scale { position: relative; height: 100%; font-size: 10px; color: var(--ink-3); }
 .meter .scale span { position: absolute; right: 0; transform: translateY(-50%); }
 .wave { height: 54px; position: relative; margin-top: 10px; }
@@ -246,7 +248,14 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 .enc-body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
 .enc-left { padding: 8px 14px 12px; display: grid; gap: 8px; min-width: 0; }
 .enc-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.enc-row input[type="text"] { flex: 1 1 240px; min-width: 0; text-transform: uppercase; letter-spacing: 0.04em; text-align: left; width: auto; }
+.enc-row > .field, .enc-row > button { flex: 0 0 auto; }
+/* The message gets a full-width line of its own, so a long text stays readable and
+   easy to click whatever the window width; the controls wrap on the line below. */
+.enc-msg { display: flex; min-width: 0; }
+.enc-msg input[type="text"] {
+  flex: 1 1 auto; width: 100%; min-width: 0; height: 34px; font-size: 15px; padding: 0 12px;
+  text-transform: uppercase; letter-spacing: 0.04em; text-align: left;
+}
 .enc-out {
   font-size: 17px; letter-spacing: 0.12em; line-height: 1.5; color: var(--ink); min-height: 1.5em;
   white-space: pre-wrap; word-break: break-word; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
@@ -309,8 +318,8 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 
 @media (max-width: 900px) {
   .body { grid-template-columns: 1fr; }
-  .main { border-right: 0; }
-  .decoded { grid-template-columns: 1fr; }
+  .main { border-right: 0; grid-template-rows: 212px 232px auto; }
+  .decoded { grid-template-columns: 1fr; min-height: 168px; }
   .timing { border-left: 0; border-top: 1px solid var(--line); }
   .intro { grid-template-columns: 1fr; }
   .facts { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }

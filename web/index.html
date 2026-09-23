@@ -289,8 +289,10 @@
       <header>Encode <span>· type a message, read it as Morse, follow the keying guide or play it</span><span class="tag">D</span></header>
       <div class="enc-body">
         <div class="enc-left">
-          <div class="enc-row">
+          <div class="enc-msg">
             <input id="encIn" class="ctl mono" type="text" value="HELLO WORLD" placeholder="Type a message" aria-label="Message to encode" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="enc-row enc-controls">
             <div class="field"><label for="encWpm">Speed</label><input id="encWpm" class="ctl mono" type="number" value="8" min="2" max="40" step="1" aria-label="Encoding speed in words per minute"> <span class="mono unit">WPM</span></div>
             <div class="field" title="Overall speed for Farnsworth spacing: characters at the speed above, longer gaps between them. Empty, or at or above the speed, means standard spacing."><label for="encFarns">Farnsworth</label><input id="encFarns" class="ctl mono" type="number" value="" placeholder="off" min="2" max="40" step="1" aria-label="Farnsworth overall speed in words per minute"> <span class="mono unit">WPM</span></div>
             <button class="ctl" id="encPlay" title="Key the tone through this machine's speakers">Play tone</button>

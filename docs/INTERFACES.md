@@ -491,6 +491,12 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Encode layout (2026-09-22): the message box has a full-width line of its
+  own (`.enc-msg`) and the controls wrap on the line below, so a long message
+  stays readable and clickable at any width. The decoded row is
+  `minmax(168px, auto)` so the timing panel is never clipped; the level meter
+  canvas is absolutely positioned (a canvas sized from its own clientHeight in
+  an auto grid row grew on every resize in the single-column layout).
 - Sent line flush (2026-09-22): `updateKeyDom` flags a redraw while the tone
   sounds or a letter is pending, so `trackSent` keeps calling `idle()` and the
   last letter closes after seven dit lengths with no further input even when
