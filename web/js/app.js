@@ -1548,7 +1548,11 @@ function updateKeyDom() {
   const text = sent.dec.text.length > 60 ? `…${sent.dec.text.slice(-60)}` : sent.dec.text;
   el.sentOut.innerHTML = escapeHtml(text) + (shown ? `<span class="sep"> ${shown}</span>` : "") || "&nbsp;";
   updatePracticeDom();
-  if (on) dirty = true;
+  // Keep redrawing while the tone sounds and while a letter is still pending, so
+  // trackSent keeps reporting the growing silence and the decoder can close the
+  // letter (seven dit lengths) with no further input, even when the main decoder
+  // is not listening and the frame loop would otherwise go to sleep.
+  if (on || pendingSymbols) dirty = true;
 }
 
 // ------------------------------------------------------------ DOM readouts

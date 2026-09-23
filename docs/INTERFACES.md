@@ -484,6 +484,12 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Sent line flush (2026-09-22): `updateKeyDom` flags a redraw while the tone
+  sounds or a letter is pending, so `trackSent` keeps calling `idle()` and the
+  last letter closes after seven dit lengths with no further input even when
+  the main decoder is not listening (before, the frame loop slept and the
+  dots and dashes stayed until the next key press). The desktop refreshes the
+  Key strip on its timer and never had the gap.
 - Search engines (2026-09-22): the page has a descriptive title and
   description, `rel=canonical` to the Pages URL, Open Graph and Twitter cards
   with `web/og.png` (1200x630, rendered by a Qt script), JSON-LD

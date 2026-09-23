@@ -299,6 +299,26 @@ test("LiveKey passes keyer variants through", () => {
   assert.deepEqual([keyer.iambic, keyer.dahRatio, keyer.weight], ["B", 3.5, 55]);
 });
 
+// The Sent line's rule: runs from the keyer's transitions, then the growing
+// silence reported through idle(); the last letter closes after seven dit
+// lengths with no further input (the page must keep calling idle for that).
+test("a hand-keyed letter is committed by idle() after seven dits of silence", () => {
+  const k = new Keyer(T);
+  const trans = [...k.keyDown(0), ...k.keyUp(T), ...k.keyDown(2 * T), ...k.keyUp(5 * T)]; // dit dah: A
+  const dec = new MorseDecoder({ wpm: 1200 / T });
+  let text = "";
+  for (let i = 1; i < trans.length; i++) {
+    const [t0, on] = trans[i - 1];
+    text += dec.feed(new Run(on, Math.round((trans[i][0] - t0) / 10)));
+  }
+  assert.equal(text, "");
+  assert.equal(dec.buffer, ".-", "the letter is still pending");
+  assert.equal(dec.idle(6 * T), "", "not yet");
+  assert.equal(dec.idle(7.5 * T), "A ", "closed by the pause alone");
+  assert.equal(dec.buffer, "");
+  assert.equal(dec.idle(20 * T), "", "flushes once");
+});
+
 // ----------------------------------------------------------------- LiveKey
 
 class FakeParam {
