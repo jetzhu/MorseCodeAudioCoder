@@ -286,6 +286,16 @@ def build_cases() -> list[dict[str, Any]]:
             {**_text_parameters("HELLO WORLD", 8), "glitch_blocks": [3, 4, 2, 5]},
         ),
         _decode_case(
+            "slowdown-20-to-4wpm",
+            "PARIS at 20 WPM, a word gap at the slow speed, then HELLO WORLD at 4 WPM. Three marks of "
+            "at least 1.5 T with no dit between them mean the estimate is stale-low: the window is "
+            "rebuilt from those runs and the letter in progress re-read, so only the first slow "
+            "letter is damaged.",
+            make_runs("PARIS", 20) + [Run(False, round(7 * (1200.0 / 4) / BLOCK_MS))] + make_runs("HELLO WORLD", 4),
+            {"segments": [{"text": "PARIS", "wpm": 20}, {"gap_blocks": round(7 * (1200.0 / 4) / BLOCK_MS)},
+                          {"text": "HELLO WORLD", "wpm": 4}]},
+        ),
+        _decode_case(
             "unknown-symbol",
             "Six dits in one letter (not in the table), a word gap, then S: emits '?' once and "
             "counts it in unknown_count.",

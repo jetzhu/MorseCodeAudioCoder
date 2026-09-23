@@ -409,7 +409,8 @@ test("reset clears held runs and trust", () => {
 
 test("speed-change parity text is pinned to nearest rank", () => {
   const { emitted, dec } = decodeRuns(speedChangeRuns(12, 6, "PARIS PARIS PARIS PARIS"));
-  assert.equal(emitted, "PARIS PARIS TTTT TT TTT TT TTT TTTT TT TTT TT TTE PARIS PARIS ");
+  // The slowdown resync re-locks three marks after the change.
+  assert.equal(emitted, "PARIS PARIS TTNARIS PARIS PARIS PARIS ");
   assert.equal(dec.ditMs, 200);
   assert.equal(dec.offsetMs, 0);
 });
@@ -916,4 +917,41 @@ test("a real speed-up of three times is accepted through the valve", () => {
   assert.ok(emitted.startsWith("PARIS PARIS "), emitted);
   assert.ok(emitted.endsWith("PARIS "), emitted);
   assert.ok(Math.abs(dec.ditMs - 80) <= 8, `ditMs ${dec.ditMs}`);
+});
+
+
+// ------------------------------------------------------------- slowdown resync
+
+test("a speed decrease re-locks within three marks", () => {
+  for (const [first, second, tail] of [
+    [20, 4, "ELLO WORLD "], [40, 8, "ELLO WORLD "], [15, 5, "ELLO WORLD "], [12, 4, "ELLO WORLD "],
+    [12, 6, "ELLO WORLD "], [20, 12, "HELLO WORLD "], [15, 10, "HELLO WORLD "],
+  ]) {
+    const slow = 1200 / Math.min(first, second);
+    const runs = [...makeRuns("PARIS", first), R(false, Math.round((7 * slow) / 10)), ...makeRuns("HELLO WORLD", second)];
+    const { emitted, dec } = decodeRuns(runs);
+    assert.ok(emitted.startsWith("PARIS "), `${first}->${second}: ${emitted}`);
+    assert.ok(emitted.endsWith(tail), `${first}->${second}: ${emitted}`);
+    assertClose(dec.ditMs / (1200 / second), 1, 0.1, `${first}->${second}: ditMs`);
+  }
+});
+
+test("runs of dahs do not trigger a false resync", () => {
+  for (const text of ["MOTTO OO", "0 TO 9", "MOM OM", "OSO", "TT EEE", "SOS HELLO"]) {
+    const { emitted, dec } = decodeRuns(makeRuns(text, 15));
+    assert.equal(emitted.trim(), text);
+    assertClose(dec.ditMs, 80, 5, text);
+  }
+});
+
+test("a resync re-reads the letter in progress", () => {
+  const dec = new MorseDecoder();
+  for (const r of makeRuns("PARIS", 20)) dec.feed(r);
+  dec.feed(R(false, 210));
+  const slow = makeRuns("H", 4);
+  let out = "";
+  for (const r of slow.slice(0, 5)) out += dec.feed(r);
+  assertClose(dec.ditMs, 300);
+  assert.equal(dec.buffer, ".");
+  assert.equal(out.trim(), "T T");
 });

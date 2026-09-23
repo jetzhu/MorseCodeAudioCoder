@@ -83,6 +83,12 @@ the true dit length, and the decoder uses that to undo the distortion.
 6. Expose `T`, `d`, current WPM, the pending symbol buffer, and the decoded
    text so the UI can show them.
 
+Speed changes (2026-09-22): the 10th-percentile window re-locks a speed-up
+within three marks but was blind to slowdowns until the window drained;
+three consecutive marks of at least 1.5 T now rebuild the estimate from the
+recent runs (five when they could be genuine dahs). Full rule in
+`docs/INTERFACES.md`.
+
 Validated on the loopback fixture: measured runs were marks 110/270 ms and
 gaps 50/210 ms for keyed 80/240 ms. Without the correction the dit estimate
 is 110 ms, the 210 ms letter gaps fall below the 220 ms threshold, and the

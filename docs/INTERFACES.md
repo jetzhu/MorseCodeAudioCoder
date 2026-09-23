@@ -238,7 +238,18 @@ times its own length) are a faster keying speed, not clicks: a valve opens
 and short marks are accepted until a long gap closes it again, so the window
 adapts; a click after silence always resets the count. Measured lengths, not
 corrected ones, are compared, so a transitional offset estimate cannot lock a
-new speed out. While holding,
+new speed out. Slowdown resync (2026-09-22): a speed-up re-locks within
+three marks because new short dits become the 10th percentile at once, but
+a slowdown used to wait for the whole 30-run window to drain while every new
+dit read as a dah ("T T T T"). Now three consecutive marks of at least
+`1.5 T`, with no mark or gap as short as a dit between them, rebuild the
+windows from those recent runs, re-read the letter in progress and suspend
+the glitch rule for eight marks; marks between `2.2 T` and `4.5 T` could
+genuinely be dahs (T, M, O, digits; jitter and the low-biased percentile
+widen the band), so when any falls in that band five are required. An
+intra-letter gap ends the streak, so a run of dahs inside a letter never
+triggers it, and a fixed speed (`wpm` given, `adaptive` False) disables it.
+While holding,
 `idle()` flushes after the longer of `7T` and `3.5 ×` the longest held mark
 (that mark may be a dah whose letter gap is as long as itself), using the
 best estimate available; a lone mark falls back to the seed (below 300 ms is

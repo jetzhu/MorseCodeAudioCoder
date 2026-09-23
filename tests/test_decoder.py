@@ -373,7 +373,9 @@ def test_speed_change_parity_text_is_pinned_to_nearest_rank():
     # on the percentile method: nearest-rank reads the last transitional
     # letters as 'TTE', an interpolated percentile as 'TI'.
     emitted, dec = decode_runs(_speed_change_runs(12, 6, "PARIS PARIS PARIS PARIS"))
-    assert emitted == "PARIS PARIS TTTT TT TTT TT TTT TTTT TT TTT TT TTE PARIS PARIS "
+    # The slowdown resync re-locks three marks after the change; before it the
+    # 200 ms dits read as dahs and the transitional text depends on nearest rank.
+    assert emitted == "PARIS PARIS TTNARIS PARIS PARIS PARIS "
     assert (dec.dit_ms, dec.offset_ms) == (200.0, 0.0)
 
 
@@ -916,3 +918,45 @@ def test_a_real_speed_up_of_three_times_is_accepted_through_the_valve():
     assert emitted.startswith("PARIS PARIS ")
     assert emitted.endswith("PARIS "), emitted
     assert dec.dit_ms == pytest.approx(80.0, rel=0.1)
+
+
+# ------------------------------------------------------------- slowdown resync
+
+
+@pytest.mark.parametrize("first, second, tail", [
+    (20, 4, "ELLO WORLD "),   # 5x slower: the first letter is lost, the rest is exact
+    (40, 8, "ELLO WORLD "),
+    (15, 5, "ELLO WORLD "),   # 3x: slow dits look like dahs, so five marks are needed
+    (12, 4, "ELLO WORLD "),
+    (12, 6, "ELLO WORLD "),   # 2x
+    (20, 12, "HELLO WORLD "),  # moderate: nothing lost (letter gaps used to read as word gaps)
+    (15, 10, "HELLO WORLD "),
+])
+def test_speed_decrease_relocks_within_three_marks(first: int, second: int, tail: str):
+    slow = 1200.0 / min(first, second)
+    runs = make_runs("PARIS", first) + [Run(False, round(7 * slow / 10))] + make_runs("HELLO WORLD", second)
+    emitted, dec = decode_runs(runs)
+    assert emitted.startswith("PARIS ")
+    assert emitted.endswith(tail), emitted
+    assert dec.dit_ms == pytest.approx(1200.0 / second, rel=0.1)
+
+
+@pytest.mark.parametrize("text", ["MOTTO OO", "0 TO 9", "MOM OM", "OSO", "TT EEE", "SOS HELLO"])
+def test_runs_of_dahs_do_not_trigger_a_false_resync(text: str):
+    emitted, dec = decode_runs(make_runs(text, 15))
+    assert emitted.strip() == text
+    assert dec.dit_ms == pytest.approx(80.0, rel=0.06)
+
+
+def test_resync_rereads_the_letter_in_progress():
+    # 20 WPM, then H at 4 WPM: the third slow dit triggers the resync and the
+    # letter in progress is re-read with the new estimate.
+    dec = MorseDecoder()
+    for r in make_runs("PARIS", 20):
+        dec.feed(r)
+    dec.feed(Run(False, 210))
+    slow = make_runs("H", 4)  # four 300 ms dits with 300 ms gaps
+    out = "".join(dec.feed(r) for r in slow[:5])  # dit gap dit gap dit: resync on the third mark
+    assert dec.dit_ms == pytest.approx(300.0)
+    assert dec.buffer == "."  # the mark that triggered it is a dit under the new estimate
+    assert out.strip() == "T T"  # the two marks read as dahs before it were already emitted

@@ -35,7 +35,10 @@
  * like dahs: reverberant dits with jitter look the same). Once trusted, a mark
  * shorter than `0.4 T` is a click and ignored, unless four arrive in a row
  * with Morse-like spacing, which is a faster speed and opens a valve until
- * the next long gap. The held runs are then classified in one go, so a message
+ * the next long gap. Three consecutive marks of at least `1.5 T` (no dit
+ * seen) mean the keying slowed down: the windows are rebuilt from those runs
+ * and the letter in progress re-read (five marks when they could be genuine
+ * dahs, about `3 T`). The held runs are then classified in one go, so a message
  * may open with T, M, O or a digit and may be keyed at 2 WPM. While holding,
  * `idle()` flushes after the longer of `7T` and `3.5 x` the longest held mark.
  *
@@ -78,6 +81,11 @@ const TRUST_MARKS_AMBIGUOUS = 5; // single-class, dah-like marks with no letter 
 const DAH_RULE_RATIO = 2.5; // single-class marks >= this * shortest gap are dahs, not dits
 const PENDING_IDLE_FACTOR = 3.5; // untrusted: idle flush waits this * longest pending mark
 const FRAGMENT_MS = 20.0; // marks this short never anchor the dit class (debounce leftovers)
+const RESYNC_MIN_RATIO = 1.5; // a mark at least this many T long is "not a dit at the current estimate"
+const RESYNC_STREAK = 3; // that many such marks in a row: the estimate is stale-low (keying slowed)
+const RESYNC_STREAK_AMBIGUOUS = 5; // ... when those marks are about 3 T: slow dits and real dahs look alike
+const RESYNC_DAH_BAND = [2.2, 4.5]; // a mark this many T long could genuinely be a dah (jitter, low-biased T)
+const RESYNC_GRACE = 8; // marks accepted without the glitch rule right after a resync
 
 /**
  * Return the q-th percentile of `values` by the nearest-rank method.
@@ -196,6 +204,11 @@ export class MorseDecoder {
     this._glitchStreak = 0;
     /** @type {number | null} length of the most recent gap run */
     this._lastGapMs = null;
+    /** @type {number[]} lengths (in T) of consecutive marks at least 1.5 T long */
+    this._longRatios = [];
+    /** @type {number[]} raw marks of the letter in progress, re-read after a resync */
+    this._letterMarks = [];
+    this._glitchGrace = 0;
 
     /** @type {number} */
     this.ditMs = this._seedDitMs();
@@ -239,6 +252,7 @@ export class MorseDecoder {
     if (run.on) {
       if (ms >= this.maxMarkMs) {
         this.buffer = "";
+        this._letterMarks.length = 0;
         this._pending.length = 0;
         return "";
       }
@@ -247,12 +261,13 @@ export class MorseDecoder {
       // valve lets them through and the window adapts.
       // The valve opens and stays open until a long gap; a click after
       // silence always resets it.
-      if (settled && ms < GLITCH_FRACTION * this.ditMs) {
+      if (settled && this._glitchGrace === 0 && ms < GLITCH_FRACTION * this.ditMs) {
         if (this._lastGapMs !== null && this._lastGapMs > GLITCH_STREAK_GAP_FACTOR * ms) this._glitchStreak = 0;
         this._glitchStreak += 1;
         if (this._glitchStreak < GLITCH_STREAK_MAX) return "";
         this._glitchStreak = GLITCH_STREAK_MAX;
       }
+      if (this._glitchGrace) this._glitchGrace -= 1;
       this._marks.push(ms);
       this._seenMark = true;
       this._updateTiming();
@@ -380,6 +395,9 @@ export class MorseDecoder {
     this._pending.length = 0;
     this._glitchStreak = 0;
     this._lastGapMs = null;
+    this._longRatios.length = 0;
+    this._letterMarks.length = 0;
+    this._glitchGrace = 0;
     if (!keepTiming) {
       this._marks.clear();
       this._gaps.clear();
@@ -398,17 +416,62 @@ export class MorseDecoder {
   /** @param {number} ms @returns {string} */
   _classifyMark(ms) {
     const corrected = ms - this.offsetMs;
+    const ratio = corrected / this.ditMs;
+    if (ratio >= RESYNC_MIN_RATIO) this._longRatios.push(ratio);
+    else this._longRatios.length = 0; // a mark as short as a dit: the estimate is not stale-low
     this.buffer += corrected < DIT_DAH_SPLIT * this.ditMs ? "." : "-";
+    this._letterMarks.push(ms);
+    if (this._slowdownDetected()) this._resync();
     return "";
   }
 
   /** @param {number} ms @returns {string} */
   _classifyGap(ms) {
     const corrected = ms + this.offsetMs;
+    // A gap as short as a dit: the marks around it are keyed at this speed.
+    if (corrected < RESYNC_MIN_RATIO * this.ditMs) this._longRatios.length = 0;
     if (corrected < LETTER_GAP * this.ditMs) return "";
     let emitted = this._flushLetter();
     if (corrected >= WORD_GAP * this.ditMs) emitted += this._endWord();
     return emitted;
+  }
+
+  /**
+   * No mark as short as the dit for several marks: the estimate is stale-low
+   * (the keying slowed). Speed-ups re-lock within three marks because new
+   * short dits become the 10th percentile at once; a slowdown used to wait
+   * for the whole window to drain while every new dit read as a dah. Three
+   * consecutive marks of at least 1.5 T settle it, except that marks about
+   * 3 T long could genuinely be dahs, so when any falls in that band five are
+   * required.
+   * @returns {boolean}
+   */
+  _slowdownDetected() {
+    if (!this._adaptive && this._wpm !== null) return false; // the speed is fixed by the user
+    const n = this._longRatios.length;
+    if (n < RESYNC_STREAK) return false;
+    const [lo, hi] = RESYNC_DAH_BAND;
+    const ambiguous = this._longRatios.some((r) => r >= lo && r <= hi);
+    return n >= (ambiguous ? RESYNC_STREAK_AMBIGUOUS : RESYNC_STREAK);
+  }
+
+  /**
+   * Rebuild the estimate from the recent runs only, so the new speed applies
+   * at once; re-read the letter in progress; suspend the glitch rule briefly
+   * in case the resync was mistaken (a genuine run of dahs).
+   */
+  _resync() {
+    const k = this._longRatios.length;
+    const recentMarks = this._marks.items.slice(-k);
+    const recentGaps = this._gaps.items.slice(-k);
+    this._marks.clear();
+    for (const v of recentMarks) this._marks.push(v);
+    this._gaps.clear();
+    for (const v of recentGaps) this._gaps.push(v);
+    this._longRatios.length = 0;
+    this._glitchGrace = RESYNC_GRACE;
+    this._updateTiming();
+    this.buffer = this._letterMarks.map((m) => (m - this.offsetMs < DIT_DAH_SPLIT * this.ditMs ? "." : "-")).join("");
   }
 
   /** Classify every held-back run with the current estimate, oldest first. @returns {string} */
@@ -522,6 +585,7 @@ export class MorseDecoder {
     }
     this.letterCount += 1;
     this.buffer = "";
+    this._letterMarks.length = 0;
     this.text += char;
     return char;
   }

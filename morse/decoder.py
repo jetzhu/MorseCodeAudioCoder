@@ -37,7 +37,10 @@ or three marks (five, or a letter gap, when three marks of one class look
 like dahs: reverberant dits with jitter look the same). Once trusted, a mark
 shorter than ``0.4 T`` is a click and ignored, unless four arrive in a row
 with Morse-like spacing, which is a faster speed and opens a valve until the
-next long gap. The held runs are then classified in one go with that
+next long gap. Three consecutive marks of at least ``1.5 T`` (no dit seen)
+mean the keying slowed down: the windows are rebuilt from those runs and the
+letter in progress re-read (five marks when they could be genuine dahs,
+about ``3 T``). The held runs are then classified in one go with that
 estimate, so a message may open with T, M, O or a digit and may be keyed at
 2 WPM. While holding, ``idle()`` flushes after the longer of ``7T`` and
 ``3.5 x`` the longest held mark, using the best estimate available (a lone
@@ -91,6 +94,11 @@ _TRUST_MARKS_AMBIGUOUS = 5  # single-class, dah-like marks with no letter gap ye
 _DAH_RULE_RATIO = 2.5  # single-class marks >= this * shortest gap are dahs, not dits
 _PENDING_IDLE_FACTOR = 3.5  # untrusted: idle flush waits this * longest pending mark
 _FRAGMENT_MS = 20.0  # marks this short never anchor the dit class (debounce leftovers)
+_RESYNC_MIN_RATIO = 1.5  # a mark at least this many T long is "not a dit at the current estimate"
+_RESYNC_STREAK = 3  # that many such marks in a row: the estimate is stale-low (keying slowed)
+_RESYNC_STREAK_AMBIGUOUS = 5  # ... when those marks are about 3 T: slow dits and real dahs look alike
+_RESYNC_DAH_BAND = (2.2, 4.5)  # a mark this many T long could genuinely be a dah (jitter, low-biased T)
+_RESYNC_GRACE = 8  # marks accepted without the glitch rule right after a resync
 
 
 def nearest_rank_percentile(values: Iterable[float], q: float) -> float:
@@ -173,6 +181,12 @@ class MorseDecoder:
         self._trusted: bool = self._wpm is not None
         self._glitch_streak: int = 0
         self._last_gap_ms: float | None = None
+        # Slowdown detection: lengths (in T) of consecutive marks at least
+        # 1.5 T long, and the raw marks of the letter in progress (re-read
+        # after a resync).
+        self._long_ratios: list[float] = []
+        self._letter_marks: list[float] = []
+        self._glitch_grace: int = 0
 
         self.dit_ms: float = self._seed_dit_ms()
         self.offset_ms: float = 0.0
@@ -259,9 +273,10 @@ class MorseDecoder:
         if run.on:
             if ms >= self.max_mark_ms:
                 self.buffer = ""
+                self._letter_marks.clear()
                 self._pending.clear()
                 return ""
-            if settled and ms < _GLITCH_FRACTION * self.dit_ms:
+            if settled and self._glitch_grace == 0 and ms < _GLITCH_FRACTION * self.dit_ms:
                 # A click, far shorter than a dit: not a symbol, not timing
                 # evidence. Four in a row with Morse spacing are a faster speed
                 # instead: the valve opens and stays open until a long gap, so
@@ -272,6 +287,8 @@ class MorseDecoder:
                 if self._glitch_streak < _GLITCH_STREAK_MAX:
                     return ""
                 self._glitch_streak = _GLITCH_STREAK_MAX
+            if self._glitch_grace:
+                self._glitch_grace -= 1
             self._marks.append(ms)
             self._seen_mark = True
             self._update_timing()
@@ -333,6 +350,9 @@ class MorseDecoder:
         self._pending.clear()
         self._glitch_streak = 0
         self._last_gap_ms = None
+        self._long_ratios.clear()
+        self._letter_marks.clear()
+        self._glitch_grace = 0
         if not keep_timing:
             self._marks.clear()
             self._gaps.clear()
@@ -346,17 +366,69 @@ class MorseDecoder:
 
     def _classify_mark(self, ms: float) -> str:
         corrected = ms - self.offset_ms
+        ratio = corrected / self.dit_ms
+        if ratio >= _RESYNC_MIN_RATIO:
+            self._long_ratios.append(ratio)
+        else:
+            self._long_ratios.clear()  # a mark as short as a dit: the estimate is not stale-low
         self.buffer += "." if corrected < _DIT_DAH_SPLIT * self.dit_ms else "-"
+        self._letter_marks.append(ms)
+        if self._slowdown_detected():
+            self._resync()
         return ""
 
     def _classify_gap(self, ms: float) -> str:
         corrected = ms + self.offset_ms
+        if corrected < _RESYNC_MIN_RATIO * self.dit_ms:
+            self._long_ratios.clear()  # a gap as short as a dit: the marks around it are at this speed
         if corrected < _LETTER_GAP * self.dit_ms:
             return ""
         emitted = self._flush_letter()
         if corrected >= _WORD_GAP * self.dit_ms:
             emitted += self._end_word()
         return emitted
+
+    def _slowdown_detected(self) -> bool:
+        """No mark as short as the dit for several marks: the estimate is stale-low (keying slowed).
+
+        Speed-ups re-lock within three marks because new short dits become the
+        10th percentile at once; a slowdown used to wait for the whole window
+        to drain while every new dit read as a dah. Three consecutive marks of
+        at least 1.5 T settle it, except that marks about 3 T long could
+        genuinely be dahs (T, M, O, digits), so when any falls in that band
+        five are required.
+        """
+        if not self._adaptive and self._wpm is not None:
+            return False  # the speed is fixed by the user
+        n = len(self._long_ratios)
+        if n < _RESYNC_STREAK:
+            return False
+        lo, hi = _RESYNC_DAH_BAND
+        ambiguous = any(lo <= r <= hi for r in self._long_ratios)
+        return n >= (_RESYNC_STREAK_AMBIGUOUS if ambiguous else _RESYNC_STREAK)
+
+    def _resync(self) -> None:
+        """Rebuild the estimate from the recent runs only, so the new speed applies at once.
+
+        The stale short marks that would otherwise take a whole window to
+        drain are dropped, the letter in progress is re-read with the new
+        estimate, and the glitch rule is suspended for a few marks in case the
+        resync was itself mistaken (a genuine run of dahs), so the following
+        letters can pull the estimate back.
+        """
+        k = len(self._long_ratios)
+        recent_marks = list(self._marks)[-k:]
+        recent_gaps = list(self._gaps)[-k:]
+        self._marks.clear()
+        self._marks.extend(recent_marks)
+        self._gaps.clear()
+        self._gaps.extend(recent_gaps)
+        self._long_ratios.clear()
+        self._glitch_grace = _RESYNC_GRACE
+        self._update_timing()
+        self.buffer = "".join(
+            "." if m - self.offset_ms < _DIT_DAH_SPLIT * self.dit_ms else "-" for m in self._letter_marks
+        )
 
     def _replay(self) -> str:
         """Classify every held-back run with the current estimate, oldest first."""
@@ -456,6 +528,7 @@ class MorseDecoder:
             self.unknown_count += 1
         self.letter_count += 1
         self.buffer = ""
+        self._letter_marks.clear()
         self.text += char
         return char
 
