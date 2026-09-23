@@ -289,3 +289,25 @@ def test_play_uses_beep_for_marks_and_sleep_for_gaps(monkeypatch) -> None:
     monkeypatch.setattr(bs.time, "sleep", lambda s: calls.append(("sleep", round(s * 1000))))
     bs.play([(True, 120), (False, 360), (True, 360)], 2491, lambda f, ms: calls.append(("beep", ms)))
     assert calls == [("beep", 120), ("sleep", 360), ("beep", 360)]
+
+
+def test_farnsworth_flag_stretches_gaps_in_dry_run() -> None:
+    std = _run("E E", "--wpm", "18", "--dry-run")
+    farns = _run("E E", "--wpm", "18", "--farnsworth", "5", "--dry-run")
+    assert std.returncode == 0 and farns.returncode == 0, (std.stderr, farns.stderr)
+    assert std.stdout.splitlines() == ["(True, 67)", "(False, 467)", "(True, 67)"]
+    assert farns.stdout.splitlines() == ["(True, 67)", "(False, 3660)", "(True, 67)"]
+    assert _run("E E", "--wpm", "18", "--farnsworth", "18", "--dry-run").stdout == std.stdout
+    bad = _run("E", "--farnsworth", "0", "--dry-run")
+    assert bad.returncode == 2 and "--farnsworth" in bad.stderr
+
+
+def test_build_timing_farnsworth_matches_morse_player() -> None:
+    from morse.player import build_timing as player_build_timing
+
+    for text, wpm, farns in [("HELLO WORLD", 18, 5), ("PARIS", 13, 8), ("E E", 20, 10), ("SOS", 10, 12)]:
+        assert bs.build_timing(text, wpm, farns) == [(on, int(ms)) for on, ms in player_build_timing(text, wpm, farns)]
+    assert bs.farnsworth_gaps(18, 5) == (1568, 3660)
+    with pytest.raises(ValueError):
+        bs.farnsworth_gaps(18, -1)
+

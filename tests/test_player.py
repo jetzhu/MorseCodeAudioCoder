@@ -578,3 +578,38 @@ def test_real_output_smoke() -> None:
     assert isinstance(player.playing, bool)
     player.stop()
     assert player.playing is False
+
+
+# -------------------------------------------------------------- Farnsworth
+
+
+def test_farnsworth_gaps_follow_the_arrl_rule() -> None:
+    from morse.player import farnsworth_gaps
+
+    assert farnsworth_gaps(18, 5) == (1568, 3660)  # the classic 18/5 numbers
+    assert farnsworth_gaps(18, None) == (200, 467)  # 3 and 7 dits of 66.7 ms
+    assert farnsworth_gaps(18, 18) == (200, 467)  # not below the character speed: standard
+    assert farnsworth_gaps(18, 25) == (200, 467)
+    assert farnsworth_gaps(13, 5) == farnsworth_gaps(13.0, 5.0)
+    with pytest.raises(ValueError):
+        farnsworth_gaps(18, 0)
+
+
+def test_build_timing_with_farnsworth_stretches_only_the_gaps_between_letters() -> None:
+    std = build_timing("SOS E", 18)
+    farns = build_timing("SOS E", 18, 5)
+    assert len(std) == len(farns)
+    for (on_a, ms_a), (on_b, ms_b) in zip(std, farns):
+        assert on_a == on_b
+        if on_a or ms_a == 67:  # marks and intra-letter gaps are unchanged
+            assert ms_a == ms_b
+    letter_gaps = [ms for (on, ms), (_, ms_std) in zip(farns, std) if not on and ms_std == 200]
+    word_gaps = [ms for (on, ms), (_, ms_std) in zip(farns, std) if not on and ms_std == 467]
+    assert letter_gaps == [1568, 1568] and word_gaps == [3660]
+    assert build_timing("SOS E", 18, 20) == std  # not below: standard
+
+
+def test_beep_sender_farnsworth_matches_the_player() -> None:
+    bs = _load_beep_sender()
+    for text, wpm, farns in [("HELLO WORLD", 18, 5), ("PARIS", 13, 8), ("E E", 20, 10), ("SOS", 10, 12)]:
+        assert bs.build_timing(text, wpm, farns) == [(on, int(ms)) for on, ms in build_timing(text, wpm, farns)]

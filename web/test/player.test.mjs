@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { TonePlayer, buildGuide, buildTiming, ditMs, layoutGuideLabels, roundHalfEven, timingDurationMs } from "../js/player.js";
+import { TonePlayer, buildGuide, buildTiming, ditMs, farnsworthGaps, layoutGuideLabels, roundHalfEven, timingDurationMs } from "../js/player.js";
 
 const seg = (on, ms) => ({ on, ms });
 
@@ -491,4 +491,32 @@ test("TonePlayer extra outputs: registered before play, connected live, removabl
   player.play(SOS_10WPM, 2491, 0.15);
   assert.ok(ac.gains[1].connectedTo.includes(bus), "outputs persist across plays");
   player.stop();
+});
+
+
+// -------------------------------------------------------------- Farnsworth
+
+test("farnsworthGaps follow the ARRL rule", () => {
+  assert.deepEqual(farnsworthGaps(18, 5), { letterGap: 1568, wordGap: 3660 });
+  assert.deepEqual(farnsworthGaps(18), { letterGap: 200, wordGap: 467 });
+  assert.deepEqual(farnsworthGaps(18, 18), { letterGap: 200, wordGap: 467 });
+  assert.deepEqual(farnsworthGaps(18, 25), { letterGap: 200, wordGap: 467 });
+  assert.throws(() => farnsworthGaps(18, 0), RangeError);
+});
+
+test("buildTiming with Farnsworth stretches only the gaps between letters", () => {
+  const std = buildTiming("SOS E", 18);
+  const farns = buildTiming("SOS E", 18, 5);
+  assert.equal(std.length, farns.length);
+  std.forEach((s, i) => {
+    assert.equal(s.on, farns[i].on);
+    if (s.on || s.ms === 67) assert.equal(farns[i].ms, s.ms);
+  });
+  const letterGaps = farns.filter((s, i) => !s.on && std[i].ms === 200).map((s) => s.ms);
+  const wordGaps = farns.filter((s, i) => !s.on && std[i].ms === 467).map((s) => s.ms);
+  assert.deepEqual(letterGaps, [1568, 1568]);
+  assert.deepEqual(wordGaps, [3660]);
+  assert.deepEqual(buildTiming("SOS E", 18, 20), std);
+  const guide = buildGuide("SOS E", 18, 5);
+  assert.equal(guide.totalMs, timingDurationMs(farns));
 });

@@ -55,7 +55,7 @@ from morse.pipeline import BlockResult, Pipeline, load_wav
 from morse import practice
 from morse.keyer import Keyer, LiveKey
 from morse.runs import Run
-from morse.player import TonePlayer, build_timing, render_tone
+from morse.player import TonePlayer, build_timing, farnsworth_gaps, render_tone
 
 __all__ = [
     "DARK",
@@ -404,21 +404,33 @@ class Encoding:
     """Total duration of ``timing``."""
     dit_ms: float
     """``1200 / wpm``."""
+    letter_gap_ms: float = 0.0
+    """Gap between letters, stretched by Farnsworth spacing when in use."""
+    word_gap_ms: float = 0.0
+    """Gap between words, stretched by Farnsworth spacing when in use."""
+    farnsworth_wpm: float | None = None
+    """Overall speed when Farnsworth spacing is in use, else None."""
 
     @property
     def mark_count(self) -> int:
         return sum(1 for on, _ in self.timing if on)
 
 
-def build_encoding(text: str, wpm: float) -> Encoding:
+def build_encoding(text: str, wpm: float, farnsworth_wpm: float | None = None) -> Encoding:
     """Encode ``text`` at ``wpm`` for display, with letter spans for the keying guide.
+
+    ``farnsworth_wpm`` below ``wpm`` stretches the letter and word gaps
+    (:func:`morse.player.farnsworth_gaps`).
 
     Walks the words and characters exactly as :func:`morse.player.build_timing`
     does (characters without a code are skipped, empty words dropped) while
     consuming its output, so the letter spans line up with the timing to the
     millisecond.
     """
-    timing = build_timing(text, wpm)
+    if farnsworth_wpm is not None and farnsworth_wpm >= float(wpm):
+        farnsworth_wpm = None
+    timing = build_timing(text, wpm, farnsworth_wpm)
+    letter_gap_ms, word_gap_ms = farnsworth_gaps(wpm, farnsworth_wpm)
     letters: list[tuple[str, float, float]] = []
     words: list[list[tuple[str, str]]] = []
     for word in text.upper().split():
@@ -444,7 +456,8 @@ def build_encoding(text: str, wpm: float) -> Encoding:
                 idx += 1
             letters.append((ch, start, t))
     return Encoding(text=text, morse=table.encode(text), timing=timing, letters=letters,
-                    total_ms=t, dit_ms=1200.0 / float(wpm))
+                    total_ms=t, dit_ms=1200.0 / float(wpm), letter_gap_ms=letter_gap_ms,
+                    word_gap_ms=word_gap_ms, farnsworth_wpm=farnsworth_wpm)
 
 
 # ------------------------------------------------------------ small widgets
@@ -1310,6 +1323,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.enc_wpm_spin = self._spin(WPM_MIN, WPM_MAX, 8)
         self.enc_wpm_spin.valueChanged.connect(self._on_message_changed)
         row.addWidget(self.enc_wpm_spin)
+        row.addWidget(self._label("WPM", 13, t.ink3, mono=True))
+        row.addWidget(self._field_label("Farnsworth"))
+        self.enc_farns_spin = self._spin(0, WPM_MAX, 0)
+        self.enc_farns_spin.setSpecialValueText("off")
+        self.enc_farns_spin.setToolTip("Overall speed for Farnsworth spacing: characters at the speed above, "
+                                       "longer gaps between them. Off, or a value at or above the speed, "
+                                       "means standard spacing.")
+        self.enc_farns_spin.valueChanged.connect(self._on_message_changed)
+        row.addWidget(self.enc_farns_spin)
         row.addWidget(self._label("WPM", 13, t.ink3, mono=True))
         self.play_button = self._button("Play tone")
         self.play_button.clicked.connect(self._on_play)
@@ -2237,8 +2259,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _rebuild_encoding(self) -> None:
         t = self.theme
+        farns = float(self.enc_farns_spin.value()) or None
         try:
-            enc = build_encoding(self.message_edit.text(), float(self.enc_wpm_spin.value()))
+            enc = build_encoding(self.message_edit.text(), float(self.enc_wpm_spin.value()), farns)
         except ValueError as exc:
             self.set_status_error(str(exc))
             return
@@ -2254,7 +2277,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ro = self.enc_readouts
         ro["Duration"].set_value(f"{enc.total_ms / 1000:.1f}", "s")
         ro["Dit · dah"].set_value(f"{round(dit)} · {round(3 * dit)} ms")
-        ro["Letter gap · word gap"].set_value(f"{round(3 * dit)} · {round(7 * dit)} ms")
+        ro["Letter gap · word gap"].set_value(f"{round(enc.letter_gap_ms)} · {round(enc.word_gap_ms)} ms")
         ro["Tone"].set_value(f"{self.pipeline.f0:.0f}", "Hz")
 
     def morse_output_text(self) -> str:

@@ -77,7 +77,22 @@ def unknown_characters(text: str) -> str:
     return "".join(seen)
 
 
-def build_timing(text: str, wpm: float) -> Timing:
+def farnsworth_gaps(wpm: float, farnsworth: float | None) -> tuple[int, int]:
+    """Letter and word gap in ms; ARRL Farnsworth spacing when ``farnsworth`` is below ``wpm``.
+
+    ``ta = (60 c - 37.2 s) / (s c)`` seconds; letter gap ``3 ta / 19``, word
+    gap ``7 ta / 19`` (same rule as ``morse.player.farnsworth_gaps``).
+    """
+    dit = dit_ms(wpm)
+    if farnsworth is None or farnsworth >= wpm:
+        return int(round(3 * dit)), int(round(7 * dit))
+    if farnsworth <= 0:
+        raise ValueError(f"farnsworth must be positive, got {farnsworth!r}")
+    ta = (60.0 * wpm - 37.2 * farnsworth) / (farnsworth * wpm)
+    return int(round(1000.0 * 3.0 * ta / 19.0)), int(round(1000.0 * 7.0 * ta / 19.0))
+
+
+def build_timing(text: str, wpm: float, farnsworth: float | None = None) -> Timing:
     """Return the keying sequence for ``text`` as ``[(on, ms), ...]``.
 
     Case-insensitive. Characters without a Morse code are skipped. Whitespace
@@ -85,12 +100,13 @@ def build_timing(text: str, wpm: float) -> Timing:
     mark and ends with the last mark: no leading or trailing gap, and never two
     adjacent gaps. Durations are ``round(k * 1200 / wpm)`` for k in
     {1, 3, 7}, so at 10 WPM a dit is 120 ms, a dah 360 ms, a word gap 840 ms.
+    A ``farnsworth`` speed below ``wpm`` stretches the letter and word gaps
+    (:func:`farnsworth_gaps`) while the elements keep their speed.
     """
     dit = dit_ms(wpm)
     dit_i = int(round(dit))
     dah_i = int(round(3 * dit))
-    letter_gap_i = int(round(3 * dit))
-    word_gap_i = int(round(7 * dit))
+    letter_gap_i, word_gap_i = farnsworth_gaps(wpm, farnsworth)
 
     words: list[list[str]] = []
     for word in text.upper().split():
@@ -219,11 +235,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description="Send text as Morse code through this machine's PC speaker.",
-        epilog="Timing: dit 1200/wpm ms, dah 3 dits, letter gap 3 dits, word gap 7 dits.",
+        epilog="Timing: dit 1200/wpm ms, dah 3 dits, letter gap 3 dits, word gap 7 dits; "
+               "--farnsworth stretches the letter and word gaps.",
     )
     parser.add_argument("text", nargs="+", help="text to send (words joined with spaces)")
     parser.add_argument("--wpm", type=float, default=DEFAULT_WPM,
                         help=f"speed in words per minute (default {DEFAULT_WPM:g})")
+    parser.add_argument("--farnsworth", type=float, default=None, metavar="WPM",
+                        help="overall speed for Farnsworth spacing: characters at --wpm, longer gaps "
+                             "between them (ARRL rule); no effect when not below --wpm")
     parser.add_argument("--freq", type=_frequency, default=DEFAULT_FREQ, metavar="HZ",
                         help=f"tone frequency in Hz, rounded to whole Hz (default {DEFAULT_FREQ})")
     parser.add_argument("--dry-run", action="store_true",
@@ -233,6 +253,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.wpm <= 0:
         parser.error("--wpm must be positive")
+    if args.farnsworth is not None and args.farnsworth <= 0:
+        parser.error("--farnsworth must be positive")
     if args.repeat < 1:
         parser.error("--repeat must be at least 1")
     return args
@@ -247,7 +269,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if skipped:
         print(f"note: no Morse code for {skipped!r}; skipped", file=sys.stderr)
 
-    seq = repeat_timing(build_timing(text, args.wpm), args.repeat, args.wpm)
+    seq = repeat_timing(build_timing(text, args.wpm, args.farnsworth), args.repeat, args.wpm)
     if not seq:
         print("nothing to send: text contains no encodable characters", file=sys.stderr)
         return 1

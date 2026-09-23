@@ -30,6 +30,13 @@ while held, like an electronic keyer; holding both alternates and a tap during
 an element is remembered. The Sent line reads back what you keyed; with Feed
 the decoder on and the decoder listening, the decoder reads it too.
 
+## Farnsworth spacing
+
+Next to the encoder speed, a Farnsworth field takes an overall speed. When it
+is below the character speed, letters keep their rhythm and the gaps between
+letters and words stretch (ARRL rule), which is how Morse is taught by ear.
+The beep sender has the same option: `--farnsworth WPM`.
+
 ## Practise
 
 The Practice strip draws a target (common words, call signs, digit groups or a

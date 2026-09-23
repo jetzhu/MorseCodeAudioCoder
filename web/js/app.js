@@ -19,7 +19,7 @@
 import { encode, lookup } from "./table.js";
 import { ToneDetector, isTonal } from "./detector.js";
 import { MorseDecoder } from "./decoder.js";
-import { TonePlayer, buildGuide, layoutGuideLabels, roundHalfEven } from "./player.js";
+import { TonePlayer, buildGuide, farnsworthGaps, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
 import { Keyer, LiveKey } from "./keyer.js";
 import { Practice, rhythm, score } from "./practice.js";
@@ -86,7 +86,7 @@ const el = {
   sym: $("symBuf"), hint: $("symHint"), text: $("textOut"),
   dit: $("ditV"), dah: $("dahV"), lgap: $("lgapV"), off: $("offV"),
   pill: $("statePill"), lvl: $("lvlV"), snr: $("snrV"), wpm: $("wpmV"), cnt: $("cntV"), unk: $("unkV"),
-  encIn: $("encIn"), encWpm: $("encWpm"), encPlay: $("encPlay"), encCopy: $("encCopy"), encOut: $("encOut"),
+  encIn: $("encIn"), encWpm: $("encWpm"), encFarns: $("encFarns"), encPlay: $("encPlay"), encCopy: $("encCopy"), encOut: $("encOut"),
   encFeed: $("encFeed"),
   keyStraight: $("keyStraight"), keyPaddle: $("keyPaddle"), keyPill: $("keyPill"), keyHelp: $("keyHelp"),
   keypadStraight: $("keypadStraight"), keypadPaddle: $("keypadPaddle"),
@@ -1064,15 +1064,17 @@ function drawHist() {
 
 // ---------------------------------------------------------------- encoder
 
-const encoder = { text: "", wpm: 8, guide: { timing: [], letters: [], totalMs: 0 }, playheadMs: null };
+const encoder = { text: "", wpm: 8, farnsworth: null, guide: { timing: [], letters: [], totalMs: 0 }, playheadMs: null };
 
 function buildEncoding() {
   const wpm = clamp(parseFloat(el.encWpm.value) || 8, 2, 40);
   encoder.wpm = wpm;
   keyer.setSpeed(1200 / wpm);
   updateKeyReadouts();
+  const farnsRaw = parseFloat(el.encFarns.value);
+  encoder.farnsworth = Number.isFinite(farnsRaw) && farnsRaw >= 2 && farnsRaw < wpm ? farnsRaw : null;
   encoder.text = el.encIn.value;
-  encoder.guide = buildGuide(encoder.text, wpm);
+  encoder.guide = buildGuide(encoder.text, wpm, encoder.farnsworth);
   const morse = encode(encoder.text);
   el.encOut.innerHTML = morse
     ? escapeHtml(morse).split(" / ").join(' <span class="sep">/</span> ')
@@ -1080,7 +1082,8 @@ function buildEncoding() {
   const T = 1200 / wpm;
   el.encDur.innerHTML = `${(encoder.guide.totalMs / 1000).toFixed(1)}<small>s</small>`;
   el.encDit.textContent = `${roundHalfEven(T)} · ${roundHalfEven(3 * T)} ms`;
-  el.encGap.textContent = `${roundHalfEven(3 * T)} · ${roundHalfEven(7 * T)} ms`;
+  const gaps = farnsworthGaps(wpm, encoder.farnsworth);
+  el.encGap.textContent = `${gaps.letterGap} · ${gaps.wordGap} ms`;
   el.encPlay.disabled = !encoder.guide.totalMs;
   dirty = true;
 }
@@ -1516,6 +1519,10 @@ function wire() {
     buildEncoding();
   });
   el.encWpm.addEventListener("input", () => {
+    player.stop();
+    buildEncoding();
+  });
+  el.encFarns.addEventListener("input", () => {
     player.stop();
     buildEncoding();
   });

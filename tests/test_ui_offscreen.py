@@ -381,3 +381,23 @@ def test_practice_strip_grades_the_sent_line(qapp, window: ui.MainWindow) -> Non
     assert window._practice.target.isdigit()
     window.pr_show_code.setChecked(True)
     assert window.pr_code_label.isVisibleTo(window)
+
+
+def test_encoder_farnsworth_spin_stretches_letter_and_word_gaps(qapp, window: ui.MainWindow) -> None:
+    window.message_edit.setText("SOS E")
+    window.enc_wpm_spin.setValue(18)
+    window.enc_farns_spin.setValue(0)  # special value "off"
+    standard = window._encoding
+    assert standard.farnsworth_wpm is None
+    assert (round(standard.letter_gap_ms), round(standard.word_gap_ms)) == (200, 467)
+    window.enc_farns_spin.setValue(5)
+    enc = window._encoding
+    assert enc.farnsworth_wpm == 5.0
+    assert (round(enc.letter_gap_ms), round(enc.word_gap_ms)) == (1568, 3660)
+    assert enc.total_ms > standard.total_ms
+    assert enc.mark_count == standard.mark_count
+    assert "1568" in window.enc_readouts["Letter gap \u00b7 word gap"].value.text()
+    assert "3660" in window.enc_readouts["Letter gap \u00b7 word gap"].value.text()
+    window.enc_farns_spin.setValue(25)  # not below the character speed: standard again
+    assert window._encoding.farnsworth_wpm is None
+    assert window._encoding.total_ms == standard.total_ms

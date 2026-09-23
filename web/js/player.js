@@ -56,7 +56,36 @@ export function roundHalfEven(x) {
 }
 
 /**
- * Keying sequence and letter spans for `text` at `wpm`.
+ * Letter and word gap (whole ms) for characters at `wpm` and an overall
+ * Farnsworth speed. Standard spacing (3 and 7 dits) without a Farnsworth
+ * speed or when it is not below `wpm`; otherwise the ARRL rule: with
+ * character speed c and overall speed s, `ta = (60c - 37.2s) / (s c)` seconds
+ * and the gaps are `3 ta / 19` (letter) and `7 ta / 19` (word). At 18/5 that
+ * is a 1568 ms letter gap and a 3660 ms word gap. Mirror of
+ * `morse.player.farnsworth_gaps`.
+ *
+ * @param {number} wpm character speed, positive
+ * @param {number | null} [farnsworthWpm=null] overall speed
+ * @returns {{letterGap: number, wordGap: number}}
+ * @throws {RangeError} when a speed is not positive
+ */
+export function farnsworthGaps(wpm, farnsworthWpm = null) {
+  const rawDit = ditMs(wpm);
+  if (farnsworthWpm === null || farnsworthWpm === undefined) {
+    return { letterGap: roundHalfEven(3 * rawDit), wordGap: roundHalfEven(7 * rawDit) };
+  }
+  const s = Number(farnsworthWpm);
+  if (!(s > 0) || !Number.isFinite(s)) throw new RangeError(`farnsworthWpm must be positive, got ${farnsworthWpm}`);
+  const c = Number(wpm);
+  if (s >= c) return { letterGap: roundHalfEven(3 * rawDit), wordGap: roundHalfEven(7 * rawDit) };
+  const ta = (60 * c - 37.2 * s) / (s * c);
+  return { letterGap: roundHalfEven((1000 * 3 * ta) / 19), wordGap: roundHalfEven((1000 * 7 * ta) / 19) };
+}
+
+/**
+ * Keying sequence and letter spans for `text` at `wpm`, optionally with
+ * Farnsworth spacing (`farnsworthWpm` below `wpm` stretches the letter and
+ * word gaps, see {@link farnsworthGaps}).
  *
  * The letter spans place each encoded character on the timeline (start of its
  * first mark to end of its last mark) so a keying guide can label them, as the
@@ -67,15 +96,15 @@ export function roundHalfEven(x) {
  *
  * @param {string} text plain text; whitespace of any kind separates words
  * @param {number} wpm words per minute, positive
+ * @param {number | null} [farnsworthWpm=null] overall speed for Farnsworth spacing
  * @returns {{timing: Segment[], letters: LetterSpan[], totalMs: number}}
  * @throws {RangeError} when `wpm` is not positive
  */
-export function buildGuide(text, wpm) {
+export function buildGuide(text, wpm, farnsworthWpm = null) {
   const rawDit = ditMs(wpm);
   const dit = roundHalfEven(rawDit);
   const dah = roundHalfEven(3 * rawDit);
-  const letterGap = roundHalfEven(3 * rawDit);
-  const wordGap = roundHalfEven(7 * rawDit);
+  const { letterGap, wordGap } = farnsworthGaps(wpm, farnsworthWpm);
 
   /** @type {{ch: string, code: string}[][]} */
   const words = [];
@@ -131,8 +160,8 @@ export function buildGuide(text, wpm) {
  * @returns {Segment[]}
  * @throws {RangeError} when `wpm` is not positive
  */
-export function buildTiming(text, wpm) {
-  return buildGuide(text, wpm).timing;
+export function buildTiming(text, wpm, farnsworthWpm = null) {
+  return buildGuide(text, wpm, farnsworthWpm).timing;
 }
 
 /**

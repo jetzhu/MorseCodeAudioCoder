@@ -397,9 +397,14 @@ word gap 7.
 ## morse/player.py (built with the UI phase)
 
 ```python
-def build_timing(text: str, wpm: float) -> list[tuple[bool, float]]
+def build_timing(text: str, wpm: float, farnsworth_wpm: float | None = None) -> list[tuple[bool, float]]
     # (on, ms) sequence: dit 1200/wpm, dah 3 dits, intra-letter gap 1, letter gap 3, word gap 7;
-    # unknown characters are skipped; leading/trailing gaps are not included
+    # unknown characters are skipped; leading/trailing gaps are not included.
+    # farnsworth_wpm below wpm stretches the letter and word gaps (ARRL rule, see farnsworth_gaps)
+
+def farnsworth_gaps(wpm: float, farnsworth_wpm: float | None) -> tuple[float, float]
+    # (letter_gap_ms, word_gap_ms): 3 and 7 dits normally; with overall speed s below character
+    # speed c, ta = (60c - 37.2s)/(s c) seconds and the gaps are 3ta/19 and 7ta/19 (18/5: 1568, 3660)
 
 def render_tone(timing: list[tuple[bool, float]], f0: float, fs: int = 48000,
                 amplitude: float = 0.3, ramp_ms: float = 3.0) -> np.ndarray
@@ -479,6 +484,12 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Farnsworth (2026-09-22): an optional overall speed next to the encoder speed,
+  empty for off; when below the character speed the keying guide, Play, the
+  duration and gap readouts use `farnsworthGaps` / `farnsworth_gaps`. The
+  key strip is unaffected (it keys elements, not gaps). `tools/beep_sender.py`
+  has `--farnsworth WPM`. Note that a decoder reads Farnsworth letter gaps as
+  word gaps, since they exceed five dits by design.
 - Keying-guide labels: every letter is labelled (`layoutGuideLabels`); only a
   label that would overlap its predecessor is skipped. Speed inputs accept
   2 to 40 WPM.

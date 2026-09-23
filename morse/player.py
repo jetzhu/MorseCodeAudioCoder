@@ -32,7 +32,7 @@ import numpy as np
 
 from morse.table import MORSE_TABLE
 
-__all__ = ["Timing", "TonePlayer", "build_timing", "render_tone"]
+__all__ = ["Timing", "TonePlayer", "build_timing", "farnsworth_gaps", "render_tone"]
 
 Timing = list[tuple[bool, float]]
 """A keying sequence: ``(on, duration_ms)`` pairs, marks ``True``, gaps ``False``."""
@@ -49,7 +49,31 @@ def _dit_ms(wpm: float) -> float:
     return 1200.0 / value
 
 
-def build_timing(text: str, wpm: float) -> Timing:
+def farnsworth_gaps(wpm: float, farnsworth_wpm: float | None) -> tuple[float, float]:
+    """Letter and word gap in whole ms for characters at ``wpm`` and an overall ``farnsworth_wpm``.
+
+    Standard spacing (``3`` and ``7`` dits) when ``farnsworth_wpm`` is None
+    or not below ``wpm``. Otherwise the ARRL rule: with character speed
+    ``c`` and overall speed ``s``, the extra time per 50-unit word is
+    ``ta = (60 c - 37.2 s) / (s c)`` seconds, and the gaps become
+    ``3 ta / 19`` (letter) and ``7 ta / 19`` (word). At 18/5 that is a
+    1568 ms letter gap and a 3660 ms word gap around 67 ms elements, which
+    is how Morse is taught by ear: characters at full speed, room between.
+    """
+    dit = _dit_ms(wpm)
+    if farnsworth_wpm is None:
+        return float(round(3 * dit)), float(round(7 * dit))
+    s = float(farnsworth_wpm)
+    if not (math.isfinite(s) and s > 0.0):
+        raise ValueError(f"farnsworth_wpm must be positive, got {farnsworth_wpm!r}")
+    c = float(wpm)
+    if s >= c:
+        return float(round(3 * dit)), float(round(7 * dit))
+    ta = (60.0 * c - 37.2 * s) / (s * c)
+    return float(round(1000.0 * 3.0 * ta / 19.0)), float(round(1000.0 * 7.0 * ta / 19.0))
+
+
+def build_timing(text: str, wpm: float, farnsworth_wpm: float | None = None) -> Timing:
     """Return the keying sequence for ``text`` as ``[(on, ms), ...]``.
 
     Same rule as ``build_timing`` in ``tools/beep_sender.py``: case-insensitive;
@@ -58,6 +82,8 @@ def build_timing(text: str, wpm: float) -> Timing:
     ``round(k * 1200 / wpm)`` ms for ``k`` in 1 (dit, intra-letter gap),
     3 (dah, letter gap) and 7 (word gap), returned as whole-millisecond
     floats, so at 10 WPM a dit is 120 ms, a dah 360 ms and a word gap 840 ms.
+    With ``farnsworth_wpm`` below ``wpm`` the letter and word gaps are
+    stretched by :func:`farnsworth_gaps` while the elements keep their speed.
     The sequence starts with the first mark and ends with the last one: no
     leading or trailing gap, never two gaps in a row, and ``[]`` when
     nothing in ``text`` is encodable. ``wpm`` must be positive.
@@ -65,8 +91,7 @@ def build_timing(text: str, wpm: float) -> Timing:
     dit = _dit_ms(wpm)
     dit_ms = float(round(dit))
     dah_ms = float(round(3 * dit))
-    letter_gap_ms = float(round(3 * dit))
-    word_gap_ms = float(round(7 * dit))
+    letter_gap_ms, word_gap_ms = farnsworth_gaps(wpm, farnsworth_wpm)
 
     words: list[list[str]] = []
     for word in text.upper().split():
