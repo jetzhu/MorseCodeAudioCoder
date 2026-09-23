@@ -338,3 +338,15 @@ python -m venv .venv
 .\.venv\Scripts\python -m morse.app --list-devices
 .\.venv\Scripts\python -m morse.app --device "Microphone Array 1" --freq 1000
 ```
+
+## Search engines (2026-09-22)
+
+Tiers 1 and 2 of the discoverability plan are on the page: canonical URL,
+title and description with the words people search for, Open Graph and
+Twitter cards with a preview image, JSON-LD (web app, desktop app, FAQ), an
+About and FAQ section in plain prose, robots.txt, sitemap.xml, noindex on the
+design mock, and repository homepage and topics. Still needing the owner:
+verifying the site in Google Search Console and Bing Webmaster Tools (paste
+the tags into the marked place in `web/index.html`, then submit the sitemap),
+and any off-site links (a mention in ham-radio or maker forums) that tier 3
+would bring.

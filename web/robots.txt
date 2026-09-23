@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /mock.html
+Disallow: /test/
+
+Sitemap: https://jetzhu.github.io/MorseCodeAudioCoder/sitemap.xml

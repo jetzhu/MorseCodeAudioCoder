@@ -3,8 +3,141 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Beeper Morse Console</title>
-<meta name="description" content="Decode a PC beeper's Morse code from the microphone, in the browser. Nothing leaves this machine.">
+<title>Beeper Morse Console: online Morse code decoder, encoder and keyer</title>
+<meta name="description" content="Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.">
+<link rel="canonical" href="https://jetzhu.github.io/MorseCodeAudioCoder/">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#1B2126">
+<meta name="author" content="Jian Jet Zhu">
+<!-- Search Console and Bing Webmaster verification tags go here, e.g.
+     <meta name="google-site-verification" content="...">
+     <meta name="msvalidate.01" content="..."> -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jetzhu.github.io/MorseCodeAudioCoder/">
+<meta property="og:site_name" content="Beeper Morse Console">
+<meta property="og:title" content="Beeper Morse Console: online Morse code decoder, encoder and keyer">
+<meta property="og:description" content="Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.">
+<meta property="og:image" content="https://jetzhu.github.io/MorseCodeAudioCoder/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Beeper Morse Console: online Morse code decoder, encoder and keyer">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Beeper Morse Console: online Morse code decoder, encoder and keyer">
+<meta name="twitter:description" content="Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.">
+<meta name="twitter:image" content="https://jetzhu.github.io/MorseCodeAudioCoder/og.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebApplication",
+      "@id": "https://jetzhu.github.io/MorseCodeAudioCoder/#app",
+      "name": "Beeper Morse Console",
+      "alternateName": "Morse Code Audio Decoder",
+      "url": "https://jetzhu.github.io/MorseCodeAudioCoder/",
+      "description": "Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.",
+      "applicationCategory": "UtilitiesApplication",
+      "operatingSystem": "Any (web browser)",
+      "browserRequirements": "Requires a browser with Web Audio and microphone access; Chrome or Edge recommended",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "isAccessibleForFree": true,
+      "image": "https://jetzhu.github.io/MorseCodeAudioCoder/og.png",
+      "featureList": [
+        "Live Morse code decoding from the microphone",
+        "Tone frequency auto-detection and spectrum display",
+        "Adaptive speed estimate, 2 to 40 WPM",
+        "Text to Morse encoder with keying guide, playback and Farnsworth spacing",
+        "Straight key, iambic keyer (mode A/B) and bug from the keyboard",
+        "Practice drills with grading",
+        "Decoded log export with timestamps"
+      ],
+      "author": {
+        "@type": "Person",
+        "name": "Jian Jet Zhu",
+        "url": "https://github.com/jetzhu"
+      },
+      "codeRepository": "https://github.com/jetzhu/MorseCodeAudioCoder"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://jetzhu.github.io/MorseCodeAudioCoder/#desktop",
+      "name": "Morse Console for Windows",
+      "url": "https://jetzhu.github.io/MorseCodeAudioCoder/#download",
+      "description": "The same Morse decoder, encoder and keyer as an offline Windows desktop program reading the raw microphone.",
+      "applicationCategory": "UtilitiesApplication",
+      "operatingSystem": "Windows 10, Windows 11",
+      "downloadUrl": "https://github.com/jetzhu/MorseCodeAudioCoder/releases/latest",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "isAccessibleForFree": true
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Does the audio leave my computer?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. The microphone is opened by the page and processed with the Web Audio API inside the browser. Nothing is recorded or uploaded, and the page works offline once loaded. The desktop app never uses the network."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which browsers work?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Chrome and Edge open the microphone in raw mode when the page asks for it, so a steady beeper tone arrives clean. Firefox on Windows only offers the processed microphone signal, which suppresses steady tones; there, tick Feed the decoder to hear the built-in encoder and key, or use the desktop app, which reads the raw microphone endpoint."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What tone frequency does it expect?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Any frequency between 100 Hz and half the sample rate. The default is 2491 Hz, a common PC beeper pitch; Auto-detect picks the strongest steady tone in the spectrum, or type the frequency in."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How fast can it decode?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Speeds from 2 to 40 words per minute. The speed estimate adapts as you key and re-locks within a few marks when the speed changes; Manual mode fixes it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can it send Morse code too?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. The encoder turns text into Morse with a keying guide and plays it through the speakers, optionally with Farnsworth spacing. The Key strip is a straight key, an iambic keyer (mode A or B) or a bug driven from the keyboard, and the Practice strip grades what you key."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is there a version I can run offline?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. The desktop app for Windows is a zip on the GitHub release page; it needs no Python and no internet. The source runs on any platform with Python 3.11 or newer."
+      }
+    }
+  ]
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231B2126'/%3E%3Ccircle cx='8' cy='16' r='3' fill='%23EFA24E'/%3E%3Crect x='14' y='13' width='12' height='6' rx='3' fill='%23EFA24E'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -284,6 +417,57 @@
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>
+
+
+  <section class="about" id="about" aria-labelledby="aboutTitle">
+    <div class="eyebrow">About</div>
+    <h2 id="aboutTitle">How this Morse code decoder works</h2>
+    <div class="cols">
+      <div>
+        <h3>Morse code from a microphone, in the browser</h3>
+        <p>The page opens the microphone with the Web Audio API and measures the power at one tone frequency every
+          10 ms with a Goertzel filter, the cheapest way to watch a single pitch. A slow tracker follows the noise
+          floor and another the signal level; the tone is called ON when its power climbs well above the floor and
+          OFF when it drops back, with hysteresis and a short debounce so clicks and reverberation do not chop
+          it. Loud but broadband sounds such as speech never switch it on.</p>
+        <h3>From marks and gaps to letters</h3>
+        <p>The ON and OFF runs are sorted into dits, dahs and the three kinds of gap by an adaptive estimate of
+          the dit length, so the speed does not have to be set: it is measured from what arrives, between 2 and
+          40 words per minute, and re-locks within a few marks when the sender speeds up or slows down. Letters
+          appear as they are completed, with the letter in progress shown as dots and dashes.</p>
+        <h3>Why a PC beeper</h3>
+        <p>A desktop computer's onboard speaker keyed from a push button makes a clean square-ish tone around
+          2.5 kHz that a laptop microphone hears from across a room. It is a convenient Morse practice
+          oscillator, and any other steady tone works the same way: a code-practice oscillator, a radio's CW
+          sidetone or a recording played nearby.</p>
+      </div>
+      <div>
+        <h3>Encoder, hand key and practice</h3>
+        <p>The encoder turns text into Morse with a keying guide drawn to scale, plays it through the speakers
+          and can space it Farnsworth-style for learning. The Key strip makes the keyboard a straight key, an
+          iambic keyer with mode A or B, or a bug, with a sidetone, adjustable dah ratio and weight, and keys
+          you can rebind. The Practice strip hands out words, call signs and number groups and grades your
+          copy and rhythm. The decoded log, with the time each word arrived, can be downloaded.</p>
+        <h3>Privacy</h3>
+        <p>Everything runs in this browser tab. No audio, text or settings are sent anywhere; the only network
+          requests are for the fonts and the release list of the desktop app on GitHub.</p>
+        <h3>Browsers and the desktop app</h3>
+        <p>Chrome and Edge give the page the raw microphone signal. Firefox on Windows supplies a processed
+          signal that suppresses steady tones, so the desktop app, which reads the raw endpoint and needs no
+          browser or internet connection, is the better fit there. Both share the same decoder, verified against
+          the same recordings.</p>
+      </div>
+    </div>
+    <h2 id="faqTitle">Frequently asked questions</h2>
+    <div class="faq">
+      <div class="qa"><h3>Does the audio leave my computer?</h3><p>No. The microphone is opened by the page and processed with the Web Audio API inside the browser. Nothing is recorded or uploaded, and the page works offline once loaded. The desktop app never uses the network.</p></div>
+      <div class="qa"><h3>Which browsers work?</h3><p>Chrome and Edge open the microphone in raw mode when the page asks for it, so a steady beeper tone arrives clean. Firefox on Windows only offers the processed microphone signal, which suppresses steady tones; there, tick Feed the decoder to hear the built-in encoder and key, or use the desktop app, which reads the raw microphone endpoint.</p></div>
+      <div class="qa"><h3>What tone frequency does it expect?</h3><p>Any frequency between 100 Hz and half the sample rate. The default is 2491 Hz, a common PC beeper pitch; Auto-detect picks the strongest steady tone in the spectrum, or type the frequency in.</p></div>
+      <div class="qa"><h3>How fast can it decode?</h3><p>Speeds from 2 to 40 words per minute. The speed estimate adapts as you key and re-locks within a few marks when the speed changes; Manual mode fixes it.</p></div>
+      <div class="qa"><h3>Can it send Morse code too?</h3><p>Yes. The encoder turns text into Morse with a keying guide and plays it through the speakers, optionally with Farnsworth spacing. The Key strip is a straight key, an iambic keyer (mode A or B) or a bug driven from the keyboard, and the Practice strip grades what you key.</p></div>
+      <div class="qa"><h3>Is there a version I can run offline?</h3><p>Yes. The desktop app for Windows is a zip on the GitHub release page; it needs no Python and no internet. The source runs on any platform with Python 3.11 or newer.</p></div>
+    </div>
+  </section>
 
   <div class="foot">
     Chrome or Edge recommended. Source and issues: <a href="https://github.com/jetzhu/MorseCodeAudioCoder">github.com/jetzhu/MorseCodeAudioCoder</a>.

@@ -484,6 +484,16 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Search engines (2026-09-22): the page has a descriptive title and
+  description, `rel=canonical` to the Pages URL, Open Graph and Twitter cards
+  with `web/og.png` (1200x630, rendered by a Qt script), JSON-LD
+  (`WebApplication` + `SoftwareApplication` graph, and a `FAQPage` whose
+  questions are the h3s of the About section), an About/FAQ section above the
+  footer, `web/robots.txt` (mock.html and test/ disallowed) and
+  `web/sitemap.xml`; `mock.html` is `noindex`. Verification meta tags for
+  Search Console and Bing go in the marked place in the head. The repository
+  carries the Pages URL as homepage and topics. `web/test/seo.test.mjs`
+  guards all of it.
 - Decoded log export (2026-09-22, v0.1.8): `morse/declog.py` and
   `web/js/declog.js` (`DecodedLog.add(text, elapsed_ms, wall)`, `words()`,
   `render_text(header, now, tz)`, `render_csv(tz)`; identical output for

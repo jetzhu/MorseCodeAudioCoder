@@ -290,6 +290,19 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 .note .tag { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--bg); font-size: 11px; font-weight: 600; margin-top: 2px; }
 .note h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .note p { margin: 2px 0 0; color: var(--ink-2); font-size: 14px; }
+/* ---------- about and FAQ ---------- */
+.about { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 18px 20px 6px; }
+.about h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
+.about h2 + .cols { margin-bottom: 18px; }
+.about .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
+.about h3 { margin: 12px 0 4px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.about p { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; max-width: 68ch; }
+.about .faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
+.about .qa h3 { margin-top: 10px; }
+.about .qa p { margin-bottom: 12px; }
+@media (max-width: 900px) {
+  .about .cols, .about .faq { grid-template-columns: 1fr; }
+}
 .foot { color: var(--ink-3); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 12px; }
 .foot a { color: var(--ink-2); }
 
