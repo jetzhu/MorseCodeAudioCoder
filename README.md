@@ -1,8 +1,14 @@
-# Morse Code Audio Decoder
+# Beeper Morse Console: Morse code simulator, decoder and trainer
 
-Listens to the laptop microphone, isolates the tone of a PC beeper on another
-machine (2491 Hz, a classic BIOS-style beep), shows what it hears, and decodes
-the on/off pattern as Morse code. Pure Python: numpy/scipy for the DSP,
+Live page: <https://jetzhu.github.io/MorseCodeAudioCoder/> (browser, nothing
+uploaded). Windows desktop app on the [releases page](https://github.com/jetzhu/MorseCodeAudioCoder/releases/latest).
+
+An online Morse code simulator, translator and trainer: it listens to the
+laptop microphone, isolates the tone of a PC beeper on another machine
+(2491 Hz, a classic BIOS-style beep), shows what it hears, and decodes the
+on/off pattern as Morse code; it translates text to Morse and plays it; it
+turns the keyboard into a straight key, iambic keyer or bug; and it grades
+practice drills against a chart that lights up as you key. Pure Python: numpy/scipy for the DSP,
 sounddevice for capture, pyqtgraph + PySide6 for the live window.
 
 Signal chain: 48 kHz mono in 10 ms blocks -> Goertzel tone power at `f0` ->

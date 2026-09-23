@@ -304,6 +304,8 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 .about { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 18px 20px 6px; }
 .about h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
 .about h2 + .cols { margin-bottom: 18px; }
+.about .lead { font-size: 14px; line-height: 1.55; color: var(--ink-2); max-width: 80ch; margin: 0 0 18px; }
+.about .lead b { color: var(--ink); font-weight: 600; }
 .about .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
 .about h3 { margin: 12px 0 4px; font-size: 14px; font-weight: 600; color: var(--ink); }
 .about p { margin: 0 0 8px; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; max-width: 68ch; }

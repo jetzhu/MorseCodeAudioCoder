@@ -356,6 +356,18 @@ the tags into the marked place in `web/index.html`, then submit the sitemap),
 and any off-site links (a mention in ham-radio or maker forums) that tier 3
 would bring.
 
+Search terms (2026-09-23): the title, description, eyebrow, an About lead
+paragraph, three FAQ entries, JSON-LD `alternateName`/`keywords`, the README
+title and the repository description and topics now carry the words people
+type: Morse code simulator, translator, trainer, practice, chart, CW decoder,
+learn Morse code. The chart is pre-rendered in the HTML (app.js reuses the
+cells) so crawlers see it without running scripts. Off-site steps for the
+owner, in order of effect: verify the site in Google Search Console and Bing
+Webmaster Tools and submit the sitemap; get a handful of real links (ham-radio
+and maker forums, a Show HN, an AlternativeTo listing, awesome-lists, club
+newsletters); keep the release cadence visible on GitHub (stars and forks are
+themselves signals); pin the repository on the GitHub profile.
+
 ## Reference chart (2026-09-23)
 
 Section G, a Morse code chart built from the shared table in both apps

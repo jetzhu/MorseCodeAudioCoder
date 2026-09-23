@@ -6,6 +6,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { chartEntries } from "../js/reference.js";
+
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SITE = "https://jetzhu.github.io/MorseCodeAudioCoder/";
 const html = readFileSync(join(WEB, "index.html"), "utf8");
@@ -22,7 +24,10 @@ test("head carries a canonical URL, a description and social cards", () => {
   assert.equal(attr(/<meta property="og:url" content="([^"]+)"/), SITE);
   assert.equal(attr(/<meta property="og:image" content="([^"]+)"/), `${SITE}og.png`);
   assert.equal(attr(/<meta name="twitter:card" content="([^"]+)"/), "summary_large_image");
-  assert.ok(/<title>[^<]*Morse code decoder[^<]*<\/title>/.test(html));
+  const title = attr(/<title>([^<]+)<\/title>/);
+  for (const term of ["Morse Code Simulator", "Decoder", "Trainer"]) assert.ok(title.includes(term), `${term} in the title`);
+  assert.ok(title.length <= 75, `title length ${title.length}`);
+  for (const term of ["simulator", "translate", "practise", "chart"]) assert.ok(description.includes(term), `${term} in the description`);
   assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, "exactly one h1");
   assert.ok(existsSync(join(WEB, "og.png")));
 });
@@ -51,4 +56,17 @@ test("robots.txt, sitemap.xml and the mock agree", () => {
   assert.ok(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/.test(sitemap));
   const mock = readFileSync(join(WEB, "mock.html"), "utf8");
   assert.ok(mock.includes('<meta name="robots" content="noindex,nofollow">'));
+});
+
+test("the chart is in the HTML and matches the shared table", () => {
+  const cells = [...html.matchAll(/<button type="button" class="refcell" data-code="([^"]+)" title="Play [^"]*"><span class="ch">([^<]+)<\/span>/g)];
+  const entries = chartEntries();
+  assert.equal(cells.length, entries.length);
+  cells.forEach((m, i) => {
+    const ch = m[2].replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+    assert.equal(ch, entries[i][0]);
+    assert.equal(m[1], entries[i][1]);
+  });
+  assert.ok(html.includes("Morse code simulator"));
+  assert.ok(/<h3>Is this a Morse code simulator\?<\/h3>/.test(html));
 });

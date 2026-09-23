@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Beeper Morse Console: online Morse code decoder, encoder and keyer</title>
-<meta name="description" content="Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.">
+<title>Morse Code Simulator, Decoder and Trainer Online | Beeper Morse Console</title>
+<meta name="description" content="Free online Morse code simulator: decode Morse from a microphone or PC beeper, translate text to Morse and play it, practise with a keyer, learn from the chart. Nothing is uploaded.">
 <link rel="canonical" href="https://jetzhu.github.io/MorseCodeAudioCoder/">
 <meta name="robots" content="index,follow">
 <meta name="theme-color" content="#1B2126">
@@ -15,16 +15,16 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://jetzhu.github.io/MorseCodeAudioCoder/">
 <meta property="og:site_name" content="Beeper Morse Console">
-<meta property="og:title" content="Beeper Morse Console: online Morse code decoder, encoder and keyer">
-<meta property="og:description" content="Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.">
+<meta property="og:title" content="Morse Code Simulator, Decoder and Trainer Online | Beeper Morse Console">
+<meta property="og:description" content="Free online Morse code simulator: decode Morse from a microphone or PC beeper, translate text to Morse and play it, practise with a keyer, learn from the chart. Nothing is uploaded.">
 <meta property="og:image" content="https://jetzhu.github.io/MorseCodeAudioCoder/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Beeper Morse Console: online Morse code decoder, encoder and keyer">
+<meta property="og:image:alt" content="Beeper Morse Console: Morse code simulator, decoder and trainer">
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Beeper Morse Console: online Morse code decoder, encoder and keyer">
-<meta name="twitter:description" content="Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.">
+<meta name="twitter:title" content="Morse Code Simulator, Decoder and Trainer Online | Beeper Morse Console">
+<meta name="twitter:description" content="Free online Morse code simulator: decode Morse from a microphone or PC beeper, translate text to Morse and play it, practise with a keyer, learn from the chart. Nothing is uploaded.">
 <meta name="twitter:image" content="https://jetzhu.github.io/MorseCodeAudioCoder/og.png">
 <script type="application/ld+json">
 {
@@ -34,9 +34,15 @@
       "@type": "WebApplication",
       "@id": "https://jetzhu.github.io/MorseCodeAudioCoder/#app",
       "name": "Beeper Morse Console",
-      "alternateName": "Morse Code Audio Decoder",
+      "alternateName": [
+        "Morse Code Simulator",
+        "Morse Code Translator",
+        "Morse Code Trainer",
+        "Morse Code Audio Decoder"
+      ],
+      "keywords": "morse code simulator, morse code decoder, morse code translator, morse code trainer, morse code practice, morse code keyer, morse code chart, CW decoder, learn morse code, PC beeper",
       "url": "https://jetzhu.github.io/MorseCodeAudioCoder/",
-      "description": "Free online Morse code decoder: point the microphone at a PC beeper or any CW tone and read the text live. Encoder with keying guide, hand key, practice drills. Runs in the browser; nothing is uploaded.",
+      "description": "Free online Morse code simulator: decode Morse from a microphone or PC beeper, translate text to Morse and play it, practise with a keyer, learn from the chart. Nothing is uploaded.",
       "applicationCategory": "UtilitiesApplication",
       "operatingSystem": "Any (web browser)",
       "browserRequirements": "Requires a browser with Web Audio and microphone access; Chrome or Edge recommended",
@@ -89,6 +95,30 @@
   "mainEntity": [
     {
       "@type": "Question",
+      "name": "Is this a Morse code simulator?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. It simulates the whole loop: a text-to-Morse translator that plays the code, a straight key, iambic keyer and bug you work from the keyboard, and a decoder that reads the result back, plus practice drills and a chart. Everything runs in the browser."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can it translate text to Morse code and back?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Both ways. Type text and the encoder shows the Morse and plays it at any speed from 2 to 40 words per minute, with optional Farnsworth spacing. Play a Morse tone at the microphone, or key one yourself, and the decoder turns it back into text."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I learn Morse code with it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "That is what the Key, Practice and Reference strips are for. The chart lights up the characters your dots and dashes could still become as you key, the Practice strip hands out words, call signs and number groups and grades your copy and rhythm, and Farnsworth spacing lets you hear characters at full speed with room between them."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Does the audio leave my computer?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -100,7 +130,7 @@
       "name": "Which browsers work?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Chrome and Edge open the microphone in raw mode when the page asks for it, so a steady beeper tone arrives clean. Firefox on Windows only offers the processed microphone signal, which suppresses steady tones; there, tick Feed the decoder to hear the built-in encoder and key, or use the desktop app, which reads the raw microphone endpoint."
+        "text": "Chrome and Edge open the microphone in raw mode when the page asks for it, so a steady beeper tone arrives clean. Firefox on Windows often supplies a processed microphone signal that suppresses steady tones; there, try Mic: Browser default, tick Feed the decoder to hear the built-in encoder and key, or use the desktop app, which reads the raw microphone endpoint."
       }
     },
     {
@@ -117,14 +147,6 @@
       "acceptedAnswer": {
         "@type": "Answer",
         "text": "Speeds from 2 to 40 words per minute. The speed estimate adapts as you key and re-locks within a few marks when the speed changes; Manual mode fixes it."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Can it send Morse code too?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Yes. The encoder turns text into Morse with a keying guide and plays it through the speakers, optionally with Farnsworth spacing. The Key strip is a straight key, an iambic keyer (mode A or B) or a bug driven from the keyboard, and the Practice strip grades what you key."
       }
     },
     {
@@ -148,7 +170,7 @@
 <div class="page">
   <div class="intro">
     <div>
-      <div class="eyebrow">Browser decoder · runs entirely on this machine</div>
+      <div class="eyebrow">Online Morse code simulator · decoder · translator · trainer · runs entirely on this machine</div>
       <h1>Beeper Morse Console</h1>
       <p>Press <b>Start</b>, allow the microphone, and key Morse on the beeper. The page measures the tone
         power every 10 ms, tracks the noise floor, and turns marks and gaps into letters. Audio never leaves
@@ -395,7 +417,60 @@
     <section class="encode reference" aria-label="Morse code chart">
       <header>Reference <span>· Morse code chart; the letter being keyed or decoded lights up</span><button class="ctl" id="refToggle" aria-expanded="false" aria-controls="refBody">Show chart</button><span class="tag">G</span></header>
       <div class="refbody" id="refBody" hidden>
-        <div class="refgrid" id="refGrid" aria-label="Characters and their Morse code"></div>
+        <div class="refgrid" id="refGrid" aria-label="Characters and their Morse code">
+          <button type="button" class="refcell" data-code=".-" title="Play A"><span class="ch">A</span><span class="code mono">·−</span></button>
+          <button type="button" class="refcell" data-code="-..." title="Play B"><span class="ch">B</span><span class="code mono">−···</span></button>
+          <button type="button" class="refcell" data-code="-.-." title="Play C"><span class="ch">C</span><span class="code mono">−·−·</span></button>
+          <button type="button" class="refcell" data-code="-.." title="Play D"><span class="ch">D</span><span class="code mono">−··</span></button>
+          <button type="button" class="refcell" data-code="." title="Play E"><span class="ch">E</span><span class="code mono">·</span></button>
+          <button type="button" class="refcell" data-code="..-." title="Play F"><span class="ch">F</span><span class="code mono">··−·</span></button>
+          <button type="button" class="refcell" data-code="--." title="Play G"><span class="ch">G</span><span class="code mono">−−·</span></button>
+          <button type="button" class="refcell" data-code="...." title="Play H"><span class="ch">H</span><span class="code mono">····</span></button>
+          <button type="button" class="refcell" data-code=".." title="Play I"><span class="ch">I</span><span class="code mono">··</span></button>
+          <button type="button" class="refcell" data-code=".---" title="Play J"><span class="ch">J</span><span class="code mono">·−−−</span></button>
+          <button type="button" class="refcell" data-code="-.-" title="Play K"><span class="ch">K</span><span class="code mono">−·−</span></button>
+          <button type="button" class="refcell" data-code=".-.." title="Play L"><span class="ch">L</span><span class="code mono">·−··</span></button>
+          <button type="button" class="refcell" data-code="--" title="Play M"><span class="ch">M</span><span class="code mono">−−</span></button>
+          <button type="button" class="refcell" data-code="-." title="Play N"><span class="ch">N</span><span class="code mono">−·</span></button>
+          <button type="button" class="refcell" data-code="---" title="Play O"><span class="ch">O</span><span class="code mono">−−−</span></button>
+          <button type="button" class="refcell" data-code=".--." title="Play P"><span class="ch">P</span><span class="code mono">·−−·</span></button>
+          <button type="button" class="refcell" data-code="--.-" title="Play Q"><span class="ch">Q</span><span class="code mono">−−·−</span></button>
+          <button type="button" class="refcell" data-code=".-." title="Play R"><span class="ch">R</span><span class="code mono">·−·</span></button>
+          <button type="button" class="refcell" data-code="..." title="Play S"><span class="ch">S</span><span class="code mono">···</span></button>
+          <button type="button" class="refcell" data-code="-" title="Play T"><span class="ch">T</span><span class="code mono">−</span></button>
+          <button type="button" class="refcell" data-code="..-" title="Play U"><span class="ch">U</span><span class="code mono">··−</span></button>
+          <button type="button" class="refcell" data-code="...-" title="Play V"><span class="ch">V</span><span class="code mono">···−</span></button>
+          <button type="button" class="refcell" data-code=".--" title="Play W"><span class="ch">W</span><span class="code mono">·−−</span></button>
+          <button type="button" class="refcell" data-code="-..-" title="Play X"><span class="ch">X</span><span class="code mono">−··−</span></button>
+          <button type="button" class="refcell" data-code="-.--" title="Play Y"><span class="ch">Y</span><span class="code mono">−·−−</span></button>
+          <button type="button" class="refcell" data-code="--.." title="Play Z"><span class="ch">Z</span><span class="code mono">−−··</span></button>
+          <button type="button" class="refcell" data-code="-----" title="Play 0"><span class="ch">0</span><span class="code mono">−−−−−</span></button>
+          <button type="button" class="refcell" data-code=".----" title="Play 1"><span class="ch">1</span><span class="code mono">·−−−−</span></button>
+          <button type="button" class="refcell" data-code="..---" title="Play 2"><span class="ch">2</span><span class="code mono">··−−−</span></button>
+          <button type="button" class="refcell" data-code="...--" title="Play 3"><span class="ch">3</span><span class="code mono">···−−</span></button>
+          <button type="button" class="refcell" data-code="....-" title="Play 4"><span class="ch">4</span><span class="code mono">····−</span></button>
+          <button type="button" class="refcell" data-code="....." title="Play 5"><span class="ch">5</span><span class="code mono">·····</span></button>
+          <button type="button" class="refcell" data-code="-...." title="Play 6"><span class="ch">6</span><span class="code mono">−····</span></button>
+          <button type="button" class="refcell" data-code="--..." title="Play 7"><span class="ch">7</span><span class="code mono">−−···</span></button>
+          <button type="button" class="refcell" data-code="---.." title="Play 8"><span class="ch">8</span><span class="code mono">−−−··</span></button>
+          <button type="button" class="refcell" data-code="----." title="Play 9"><span class="ch">9</span><span class="code mono">−−−−·</span></button>
+          <button type="button" class="refcell" data-code="-.--." title="Play ("><span class="ch">(</span><span class="code mono">−·−−·</span></button>
+          <button type="button" class="refcell" data-code="-..-." title="Play /"><span class="ch">/</span><span class="code mono">−··−·</span></button>
+          <button type="button" class="refcell" data-code="-...-" title="Play ="><span class="ch">=</span><span class="code mono">−···−</span></button>
+          <button type="button" class="refcell" data-code=".-.-." title="Play +"><span class="ch">+</span><span class="code mono">·−·−·</span></button>
+          <button type="button" class="refcell" data-code="---..." title="Play :"><span class="ch">:</span><span class="code mono">−−−···</span></button>
+          <button type="button" class="refcell" data-code="--..--" title="Play ,"><span class="ch">,</span><span class="code mono">−−··−−</span></button>
+          <button type="button" class="refcell" data-code="-.--.-" title="Play )"><span class="ch">)</span><span class="code mono">−·−−·−</span></button>
+          <button type="button" class="refcell" data-code="-.-.--" title="Play !"><span class="ch">!</span><span class="code mono">−·−·−−</span></button>
+          <button type="button" class="refcell" data-code="-.-.-." title="Play ;"><span class="ch">;</span><span class="code mono">−·−·−·</span></button>
+          <button type="button" class="refcell" data-code="-....-" title="Play -"><span class="ch">-</span><span class="code mono">−····−</span></button>
+          <button type="button" class="refcell" data-code=".----." title="Play '"><span class="ch">'</span><span class="code mono">·−−−−·</span></button>
+          <button type="button" class="refcell" data-code=".--.-." title="Play @"><span class="ch">@</span><span class="code mono">·−−·−·</span></button>
+          <button type="button" class="refcell" data-code=".-.-.-" title="Play ."><span class="ch">.</span><span class="code mono">·−·−·−</span></button>
+          <button type="button" class="refcell" data-code=".-..-." title="Play &quot;"><span class="ch">&quot;</span><span class="code mono">·−··−·</span></button>
+          <button type="button" class="refcell" data-code="..--.-" title="Play _"><span class="ch">_</span><span class="code mono">··−−·−</span></button>
+          <button type="button" class="refcell" data-code="..--.." title="Play ?"><span class="ch">?</span><span class="code mono">··−−··</span></button>
+        </div>
         <div class="refnote">Click a character to hear it at the encoder speed (and, with Feed the decoder on, to see it decoded). Built from the same table the decoder and encoder use: 26 letters, 10 digits and 16 punctuation marks. Cells light up as the letter under the key, or in the decoder, takes shape; the exact match stands out.</div>
       </div>
     </section>
@@ -439,7 +514,15 @@
 
   <section class="about" id="about" aria-labelledby="aboutTitle">
     <div class="eyebrow">About</div>
-    <h2 id="aboutTitle">How this Morse code decoder works</h2>
+    <h2 id="aboutTitle">A Morse code simulator, translator and trainer in one page</h2>
+    <p class="lead">People arrive here looking for different things, and the page does all of them: a <b>Morse code
+      simulator</b> that keys, sounds and decodes a whole conversation on one machine; a <b>Morse code translator</b>
+      from text to code and, through the microphone, from code back to text; a <b>Morse code trainer</b> with a
+      straight key, iambic keyer and bug worked from the keyboard, practice drills that grade your copy, Farnsworth
+      spacing and a chart that lights up as you key; and an <b>audio Morse decoder</b> for a real PC beeper, a
+      code-practice oscillator or a radio's CW sidetone. No account, no upload, nothing to install unless you want
+      the Windows desktop app.</p>
+    <h2>How this Morse code decoder works</h2>
     <div class="cols">
       <div>
         <h3>Morse code from a microphone, in the browser</h3>
@@ -478,11 +561,13 @@
     </div>
     <h2 id="faqTitle">Frequently asked questions</h2>
     <div class="faq">
+      <div class="qa"><h3>Is this a Morse code simulator?</h3><p>Yes. It simulates the whole loop: a text-to-Morse translator that plays the code, a straight key, iambic keyer and bug you work from the keyboard, and a decoder that reads the result back, plus practice drills and a chart. Everything runs in the browser.</p></div>
+      <div class="qa"><h3>Can it translate text to Morse code and back?</h3><p>Both ways. Type text and the encoder shows the Morse and plays it at any speed from 2 to 40 words per minute, with optional Farnsworth spacing. Play a Morse tone at the microphone, or key one yourself, and the decoder turns it back into text.</p></div>
+      <div class="qa"><h3>Can I learn Morse code with it?</h3><p>That is what the Key, Practice and Reference strips are for. The chart lights up the characters your dots and dashes could still become as you key, the Practice strip hands out words, call signs and number groups and grades your copy and rhythm, and Farnsworth spacing lets you hear characters at full speed with room between them.</p></div>
       <div class="qa"><h3>Does the audio leave my computer?</h3><p>No. The microphone is opened by the page and processed with the Web Audio API inside the browser. Nothing is recorded or uploaded, and the page works offline once loaded. The desktop app never uses the network.</p></div>
-      <div class="qa"><h3>Which browsers work?</h3><p>Chrome and Edge open the microphone in raw mode when the page asks for it, so a steady beeper tone arrives clean. Firefox on Windows only offers the processed microphone signal, which suppresses steady tones; there, tick Feed the decoder to hear the built-in encoder and key, or use the desktop app, which reads the raw microphone endpoint.</p></div>
+      <div class="qa"><h3>Which browsers work?</h3><p>Chrome and Edge open the microphone in raw mode when the page asks for it, so a steady beeper tone arrives clean. Firefox on Windows often supplies a processed microphone signal that suppresses steady tones; there, try Mic: Browser default, tick Feed the decoder to hear the built-in encoder and key, or use the desktop app, which reads the raw microphone endpoint.</p></div>
       <div class="qa"><h3>What tone frequency does it expect?</h3><p>Any frequency between 100 Hz and half the sample rate. The default is 2491 Hz, a common PC beeper pitch; Auto-detect picks the strongest steady tone in the spectrum, or type the frequency in.</p></div>
       <div class="qa"><h3>How fast can it decode?</h3><p>Speeds from 2 to 40 words per minute. The speed estimate adapts as you key and re-locks within a few marks when the speed changes; Manual mode fixes it.</p></div>
-      <div class="qa"><h3>Can it send Morse code too?</h3><p>Yes. The encoder turns text into Morse with a keying guide and plays it through the speakers, optionally with Farnsworth spacing. The Key strip is a straight key, an iambic keyer (mode A or B) or a bug driven from the keyboard, and the Practice strip grades what you key.</p></div>
       <div class="qa"><h3>Is there a version I can run offline?</h3><p>Yes. The desktop app for Windows is a zip on the GitHub release page; it needs no Python and no internet. The source runs on any platform with Python 3.11 or newer.</p></div>
     </div>
   </section>

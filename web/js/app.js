@@ -1521,19 +1521,26 @@ function clearSent() {
 const ref = { cells: /** @type {HTMLElement[]} */ ([]), lastBuffer: /** @type {string | null} */ (null), playing: false };
 
 function buildReference() {
-  el.refGrid.textContent = "";
-  ref.cells = [];
-  for (const [ch, code] of chartEntries()) {
-    const cell = document.createElement("button");
-    cell.type = "button";
-    cell.className = "refcell";
-    cell.dataset.code = code;
-    cell.title = `Play ${ch}`;
-    cell.innerHTML = `<span class="ch">${escapeHtml(ch)}</span><span class="code mono">${code.replace(/\./g, "·").replace(/-/g, "−")}</span>`;
-    cell.addEventListener("click", () => playReference(ch));
-    el.refGrid.appendChild(cell);
-    ref.cells.push(cell);
+  // The cells are in the HTML (so crawlers and readers without scripts see the
+  // chart); they are rebuilt only if the markup and the table disagree.
+  const entries = chartEntries();
+  const present = Array.from(el.refGrid.querySelectorAll(".refcell"));
+  const same = present.length === entries.length
+    && present.every((cell, i) => cell.dataset.code === entries[i][1] && cell.querySelector(".ch")?.textContent === entries[i][0]);
+  if (!same) {
+    el.refGrid.textContent = "";
+    for (const [ch, code] of entries) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "refcell";
+      cell.dataset.code = code;
+      cell.title = `Play ${ch}`;
+      cell.innerHTML = `<span class="ch">${escapeHtml(ch)}</span><span class="code mono">${code.replace(/\./g, "·").replace(/-/g, "−")}</span>`;
+      el.refGrid.appendChild(cell);
+    }
   }
+  ref.cells = Array.from(el.refGrid.querySelectorAll(".refcell"));
+  ref.cells.forEach((cell, i) => cell.addEventListener("click", () => playReference(entries[i][0])));
 }
 
 function setReferenceOpen(open, persist = true) {
