@@ -529,6 +529,10 @@ Behavioural requirements
   not wiped (2026-09-23: with the decoder stopped the flag set during the draw
   was being reset at once and the flush never came). The desktop refreshes
   the Key strip on its timer and never had the gap.
+- IndexNow (2026-09-23): `web/<key>.txt` holds the IndexNow key (the file
+  name is the key); the page URL is submitted to api.indexnow.org, which feeds
+  Bing, Yandex, Seznam and Naver. Google does not take IndexNow; it needs the
+  owner to verify the site in Search Console.
 - Search engines (2026-09-22): the page has a descriptive title and
   description, `rel=canonical` to the Pages URL, Open Graph and Twitter cards
   with `web/og.png` (1200x630, rendered by a Qt script), JSON-LD
