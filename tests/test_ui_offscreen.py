@@ -13,6 +13,7 @@ Skipped when PySide6 or pyqtgraph is not installed.
 from __future__ import annotations
 
 import argparse
+import time
 import os
 
 # Must be set before anything imports Qt, or the default platform is used.
@@ -503,3 +504,32 @@ def test_preference_loaders_survive_garbage(tmp_path: Path) -> None:
     assert ui.key_name(QtCore.Qt.Key.Key_Left) == "Left"
     assert ui.key_name(QtCore.Qt.Key.Key_unknown) == ""
     assert ui.key_label("Left") == "\u2190 left arrow" and ui.key_label("J") == "J"
+
+
+def test_decoded_log_is_stamped_and_saved(qapp, window: ui.MainWindow, tmp_path: Path) -> None:
+    assert window._log.is_empty and not window.log_button.isEnabled()
+    with pytest.raises(ValueError):
+        window.save_log(tmp_path / "early.txt")
+    drive_replay(window)
+    window._refresh_decoded()
+    assert window.log_button.isEnabled()
+    words = window._log.words()
+    assert [w.text for w in words] == ["SOS"]
+    assert window._log.text.strip() == window.decoded_text().strip() == "SOS"
+    # Each letter carries the audio clock of the block that produced it: the
+    # first S is decoded during the fixture, not at the flush at its end.
+    assert 0.0 < words[0].elapsed_ms < words[0].end_ms <= window.pipeline.elapsed_ms
+    assert abs(words[0].wall_s - time.time()) < 60.0
+    # Clear text keeps the log.
+    window._on_clear()
+    assert window.decoded_text().strip() == "" and window._log.text.strip() == "SOS"
+    txt = window.save_log(tmp_path / "log.txt")
+    content = txt.read_text(encoding="utf-8")
+    assert content.startswith("Beeper Morse Console decoded log\nExported: ")
+    assert "Source: Replay: loopback_sos_1khz_15wpm.wav" in content
+    assert "Tone: 1000 Hz" in content
+    assert content.rstrip().splitlines()[-1].endswith("  SOS")
+    csv = window.save_log(tmp_path / "log.csv").read_text(encoding="utf-8")
+    lines = csv.splitlines()
+    assert lines[0] == "time,elapsed_s,word" and lines[1].endswith(",SOS") and len(lines) == 2
+    assert float(lines[1].split(",")[1]) == pytest.approx(words[0].elapsed_ms / 1000.0, abs=0.006)

@@ -233,7 +233,7 @@ Candidate enhancements noted at the same time, not built:
   slower one), the standard way to learn by ear. Built 2026-09-22 (v0.1.6).
 - Configurable key bindings and a sidetone pitch separate from the beeper
   frequency. Built 2026-09-22 (v0.1.7).
-- Export of the decoded log with timestamps.
+- Export of the decoded log with timestamps. Built 2026-09-22 (v0.1.8).
 - Keyer weighting and mode variants (iambic A and B, bug mode).
 
 ## 9. Risks

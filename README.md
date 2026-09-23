@@ -37,6 +37,14 @@ is remembered between runs. **Sidetone** is the pitch you hear while keying,
 the beeper frequency itself. The decoder is always fed the beeper frequency,
 so the sidetone never affects decoding.
 
+## Save the decoded log
+
+**Save log** (desktop) and **Download log** (web) write what was decoded as
+one line per word with the computer clock when its first letter arrived and
+the audio time since the stream started. The desktop dialog offers a text
+table or CSV. Clear text does not clear the log; a new Start on the web page
+does.
+
 ## Farnsworth spacing
 
 Next to the encoder speed, a Farnsworth field takes an overall speed. When it

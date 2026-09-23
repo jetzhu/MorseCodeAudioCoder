@@ -49,7 +49,8 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-from morse import table
+from morse import __version__, table
+from morse.declog import DecodedLog, default_filename
 from morse.decoder import MorseDecoder
 from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
@@ -932,6 +933,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._auto_deadline: float | None = None
         self._error = ""
         self._text_shown: str | None = None
+        # Every character the decoder emitted, with when: exported by Save log.
+        self._log = DecodedLog()
         self._player: TonePlayer | None = None
         self._play_started: float | None = None
         # Rendered tone being mixed into the pipeline's input while Play runs and
@@ -1121,6 +1124,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_button.setToolTip("Write the last 30 seconds to a WAV file")
         self.save_button.clicked.connect(self._on_save)
         lay.addWidget(self.save_button)
+        self.log_button = self._button("Save log")
+        self.log_button.setToolTip("Write the decoded text with the time each word arrived (text or CSV)")
+        self.log_button.setEnabled(False)
+        self.log_button.clicked.connect(self._on_save_log)
+        lay.addWidget(self.log_button)
         self.clear_button = self._button("Clear text", primary=True)
         self.clear_button.clicked.connect(self._on_clear)
         lay.addWidget(self.clear_button)
@@ -1919,7 +1927,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._source = new
         try:
-            self.pipeline.flush()
+            self._log_emit(self.pipeline.flush())
             self.pipeline.detector.reset()  # noise and signal levels belonged to the old device
         except Exception as exc:
             self.set_status_error(f"pipeline reset failed: {exc}")
@@ -2023,6 +2031,7 @@ class MainWindow(QtWidgets.QMainWindow):
         block = self._key_feed(self._mix_injected(block))
         result = self.pipeline.process_block(block)
         self._last = result
+        self._log_emit(result.new_text)
         self._raw.extend(block)
         self._power.push(result.power_db)
         self._thr_hi.push(result.threshold_hi_db)
@@ -2048,7 +2057,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return level
 
     def _finish_replay(self) -> None:
-        self.pipeline.flush()
+        self._log_emit(self.pipeline.flush())
         self.replay_finished = True
         try:
             if self._source is not None:
@@ -2130,6 +2139,7 @@ class MainWindow(QtWidgets.QMainWindow):
         text = dec.text
         if text != self._text_shown:
             self._text_shown = text
+            self.log_button.setEnabled(not self._log.is_empty)
             self.text_view.setPlainText(text)
             cursor = self.text_view.textCursor()
             cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
@@ -2335,6 +2345,61 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_save_button(self) -> None:
         self.save_button.setText("Save 30 s")
         self.save_button.setEnabled(True)
+
+    # ------------------------------------------------------------ decoded log
+
+    def _log_emit(self, text: str) -> None:
+        """Stamp newly decoded ``text`` with the audio clock and the computer clock."""
+        if text:
+            self._log.add(text, self.pipeline.elapsed_ms, time.time())
+            if hasattr(self, "log_button"):
+                self.log_button.setEnabled(True)
+
+    def log_header(self) -> list[tuple[str, str]]:
+        """The lines above the table in an exported log."""
+        name = self._source.device_name if self._source is not None else "no input"
+        return [("Source", name), ("Tone", f"{self.pipeline.f0:.0f} Hz"),
+                ("App", f"Beeper Morse Console {__version__} (desktop)")]
+
+    def save_log(self, path: str | Path | None = None) -> Path:
+        """Write the decoded log; ``.csv`` gives CSV, anything else the text table. Returns the path.
+
+        Without ``path`` the file is ``morse_log_YYYYmmdd_HHMMSS.txt`` in the
+        current directory. Raises ``ValueError`` when nothing has been decoded.
+        """
+        if self._log.is_empty:
+            raise ValueError("nothing decoded yet")
+        now = time.time()
+        target = Path(path) if path is not None else Path.cwd() / default_filename(now)
+        if target.suffix.lower() == ".csv":
+            content = self._log.render_csv()
+        else:
+            content = self._log.render_text(self.log_header(), now_s=now)
+        target.write_text(content, encoding="utf-8", newline="\n")
+        return target
+
+    def _on_save_log(self) -> None:
+        if self._log.is_empty:
+            self.set_status_error("Nothing decoded yet")
+            return
+        suggested = str(Path.cwd() / default_filename(time.time()))
+        path, _filter = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save decoded log", suggested, "Text log (*.txt);;CSV (*.csv);;All files (*)")
+        if not path:
+            return
+        try:
+            written = self.save_log(path)
+        except Exception as exc:
+            self.set_status_error(f"Save failed: {exc}")
+            return
+        self.set_status_error("")
+        self.log_button.setText(f"Saved {written.name}")
+        self.log_button.setEnabled(False)
+        QtCore.QTimer.singleShot(1800, self._reset_log_button)
+
+    def _reset_log_button(self) -> None:
+        self.log_button.setText("Save log")
+        self.log_button.setEnabled(not self._log.is_empty)
 
     def save_recent_wav(self, path: str | Path | None = None) -> Path:
         """Write the last 30 s of raw input as 16-bit PCM; returns the path written.

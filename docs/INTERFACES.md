@@ -484,6 +484,17 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Decoded log export (2026-09-22, v0.1.8): `morse/declog.py` and
+  `web/js/declog.js` (`DecodedLog.add(text, elapsed_ms, wall)`, `words()`,
+  `render_text(header, now, tz)`, `render_csv(tz)`; identical output for
+  identical input, clock in seconds in Python and ms in JS). Every emission
+  point feeds it: `BlockResult.new_text` and `Pipeline.flush()` on the
+  desktop; `decoder.feed`, `decoder.idle` (per block, at Stop and when the
+  decoder is rebuilt) on the web. Clear text leaves the log alone; a new
+  stream (web Start) resets it. Save log (desktop, file dialog, `.txt` table
+  or `.csv` by extension) and Download log (web, Blob) export one line per
+  word: computer clock of the first letter, audio time since the stream
+  started, the word.
 - Key bindings and sidetone (2026-09-22, v0.1.7): `morse/bindings.py` and
   `web/js/bindings.js` share the binding rules (three actions `key`, `dit`,
   `dah`; `sanitize`, `rebind` swaps a taken key, `action_for`, `is_default`).
@@ -626,7 +637,7 @@ timer driven manually, render once, and read `SOS` from the decoded-text
 widget. Design detail:
 
 - Toolbar: input device, tone frequency with Auto-detect, speed Auto/Manual,
-  Pause, Save 30 s, Clear text.
+  Pause, Save 30 s, Save log, Clear text.
 - Spectrum 0–8 kHz with markers at f0 and 3f0.
 - Tone power over the last 10 s with the hysteresis band and the ON/OFF strip.
 - Decoded text with the pending letter, dit/dah/gap/offset readouts and a

@@ -22,6 +22,7 @@ import { MorseDecoder } from "./decoder.js";
 import { TonePlayer, buildGuide, farnsworthGaps, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
 import { Keyer, LiveKey } from "./keyer.js";
+import { DecodedLog, defaultFilename } from "./declog.js";
 import { DEFAULTS as BINDING_DEFAULTS, RESERVED_CODES, actionFor, isDefault as bindingsAreDefault, keyLabel, rebind, sanitize as sanitizeBindings } from "./bindings.js";
 import { Practice, rhythm, score } from "./practice.js";
 import { Run } from "./runs.js";
@@ -79,7 +80,7 @@ const store = {
 const el = {
   start: $("startBtn"), dev: $("dev"), f0: $("f0"), auto: $("autoBtn"),
   wpmAuto: $("wpmAuto"), wpmManual: $("wpmManual"), wpmVal: $("wpmVal"),
-  pause: $("pauseBtn"), save: $("saveBtn"), clear: $("clearBtn"),
+  pause: $("pauseBtn"), save: $("saveBtn"), log: $("logBtn"), clear: $("clearBtn"),
   msgBar: $("msgBar"), msgText: $("msgText"), msgDismiss: $("msgDismiss"),
   chopHint: $("chopHint"), chopDismiss: $("chopDismiss"),
   noteBar: $("noteBar"), noteText: $("noteText"), noteDismiss: $("noteDismiss"),
@@ -211,12 +212,20 @@ function onBlock(m) {
   processBlock(m.powerDb, m.rmsDb);
 }
 
+/** Every character the decoder emitted, with when: exported by Download log. */
+const log = new DecodedLog();
+
+/** Stamp newly decoded text with the audio clock and the computer clock. */
+function logEmit(text) {
+  if (text) log.add(text, state.blocks * state.blockMs, Date.now());
+}
+
 /** The `Pipeline.process_block` order: detector, decoder feed, idle, then the display buffers. */
 function processBlock(powerDb, rmsDb) {
   // A loud but broadband block (click, speech) never switches the detector ON.
   for (const run of detector.update(powerDb, isTonal(powerDb, rmsDb))) feedRun(run);
   const current = detector.currentRun;
-  if (!current.on) decoder.idle(current.ms);
+  if (!current.on) logEmit(decoder.idle(current.ms));
   trackFragments(detector.state);
 
   const i = hist.idx;
@@ -238,7 +247,7 @@ function processBlock(powerDb, rmsDb) {
 
 /** Hand one final run to the decoder and remember marks for the histogram. */
 function feedRun(run) {
-  decoder.feed(run);
+  logEmit(decoder.feed(run));
   if (run.on && run.ms < decoder.maxMarkMs) {
     state.recentMarks.push(run.ms);
     if (state.recentMarks.length > HIST_MARKS) state.recentMarks.shift();
@@ -281,6 +290,7 @@ function trackFragments(on) {
 
 /** Forget the stream-dependent display state (a new Start begins with a clean plot). */
 function resetStreamState() {
+  log.reset();
   state.blocks = 0;
   state.dropped = 0;
   state.lastBlockIndex = -1;
@@ -360,7 +370,7 @@ async function stopListening() {
   state.paused = false;
   syncPlayerFeed(); // detach the tone from the bus before the graph is torn down
   for (const run of detector.flush()) feedRun(run);
-  decoder.idle(Infinity);
+  logEmit(decoder.idle(Infinity));
   finishAuto(false);
   await mic.stop();
   el.pause.textContent = "Pause";
@@ -429,7 +439,7 @@ function rebuildDecoder() {
   state.wpmManual = wpm;
   el.wpmVal.value = String(wpm);
   const next = state.manual ? new MorseDecoder({ wpm, adaptive: false }) : new MorseDecoder();
-  decoder.idle(Infinity); // commit the pending letter under the old rule
+  logEmit(decoder.idle(Infinity)); // commit the pending letter under the old rule
   next.adoptTiming(decoder); // keep the measured speed and reverb offset (same as the desktop app)
   next.text = decoder.text;
   next.letterCount = decoder.letterCount;
@@ -457,6 +467,37 @@ function timestamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+/** Hand `blob` to the browser as a file download named `name`. */
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function logHeader() {
+  const dev = el.dev && el.dev.selectedOptions && el.dev.selectedOptions[0];
+  const source = dev && dev.textContent ? dev.textContent.trim() : "microphone";
+  return [["Source", source], ["Tone", `${state.f0} Hz`], ["App", "Beeper Morse Console (web)"]];
+}
+
+function downloadLog() {
+  if (log.isEmpty) {
+    showNote("Nothing decoded yet.");
+    return;
+  }
+  const now = Date.now();
+  downloadBlob(new Blob([log.renderText(logHeader(), { nowMs: now })], { type: "text/plain;charset=utf-8" }), defaultFilename(now));
+  el.log.textContent = "Saved";
+  setTimeout(() => {
+    el.log.textContent = "Download log";
+  }, 1800);
+}
+
 async function save30s() {
   if (!mic) return;
   el.save.disabled = true;
@@ -465,15 +506,7 @@ async function save30s() {
     const samples = await mic.dump30s();
     const fs = mic.running ? mic.sampleRate : mic.lastDumpRate || mic.sampleRate;
     if (!samples.length) throw new Error("no audio captured yet");
-    const blob = encodeWav(samples, fs);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `morse_${timestamp()}.wav`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    downloadBlob(encodeWav(samples, fs), `morse_${timestamp()}.wav`);
     el.save.textContent = `Saved ${(samples.length / fs).toFixed(0)} s`;
   } catch (err) {
     showNote(`Nothing saved: ${err.message}.`);
@@ -1510,6 +1543,7 @@ function updateDom() {
     el.text.innerHTML = escapeHtml(text) + (state.running && !state.paused ? '<span class="caret"></span>' : "");
     el.text.scrollTop = el.text.scrollHeight;
   }
+  el.log.disabled = log.isEmpty;
 
   const have = state.manual || state.recentMarks.length >= 2;
   el.dit.textContent = have ? `${Math.round(decoder.ditMs)} ms` : "— ms";
@@ -1606,6 +1640,7 @@ function wire() {
   el.pause.addEventListener("click", togglePause);
   el.save.addEventListener("click", save30s);
   el.clear.addEventListener("click", clearText);
+  el.log.addEventListener("click", downloadLog);
   el.msgDismiss.addEventListener("click", hideMessage);
   el.chopDismiss.addEventListener("click", () => {
     el.chopHint.hidden = true;
