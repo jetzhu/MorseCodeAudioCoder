@@ -56,6 +56,7 @@ from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
 from morse import bindings as keybind
 from morse import practice
+from morse import reference
 from morse.keyer import DAH_RATIO_RANGE, WEIGHT_RANGE, Keyer, LiveKey
 from morse.runs import Run
 from morse.player import MIC_GATE_GAIN, MIC_GATE_TAIL_MS, MicGate, TonePlayer, build_timing, farnsworth_gaps, render_tone
@@ -824,6 +825,8 @@ SETTINGS_RATIO = "key/dah_ratio"
 """QSettings key: dah length in dits."""
 SETTINGS_WEIGHT = "key/weight"
 """QSettings key: weight in percent."""
+SETTINGS_REF_OPEN = "reference/open"
+"""QSettings key: whether the Morse chart (section G) is shown."""
 DEFAULT_SIDETONE_HZ = 600
 """A comfortable pitch to key with; the beeper's 2491 Hz is shrill to sit next to."""
 SIDETONE_MAX_HZ = 4000
@@ -895,6 +898,11 @@ def load_weight(settings: QtCore.QSettings) -> int:
     return value if WEIGHT_RANGE[0] <= value <= WEIGHT_RANGE[1] else 50
 
 
+def load_reference_open(settings: QtCore.QSettings) -> bool:
+    """Whether the Morse chart was left open; closed when absent."""
+    return str(settings.value(SETTINGS_REF_OPEN, "0")).strip().lower() in ("1", "true")
+
+
 def load_sidetone(settings: QtCore.QSettings) -> int:
     """Sidetone pitch in Hz from ``settings`` (0 = follow the tone), default 600."""
     raw = settings.value(SETTINGS_SIDETONE, DEFAULT_SIDETONE_HZ)
@@ -903,6 +911,58 @@ def load_sidetone(settings: QtCore.QSettings) -> int:
     except (TypeError, ValueError):
         return DEFAULT_SIDETONE_HZ
     return value if 0 <= value <= SIDETONE_MAX_HZ else DEFAULT_SIDETONE_HZ
+
+
+class RefCell(QtWidgets.QFrame):
+    """One entry of the Morse chart: the character and its code; lights up as a letter takes shape."""
+
+    clicked = QtCore.Signal(str)
+
+    def __init__(self, theme: Theme, fonts: Fonts, ch: str, code: str,
+                 parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.theme = theme
+        self.ch = ch
+        self.code = code
+        self.state = ""
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(f"Play {ch}")
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(8, 3, 8, 3)
+        lay.setSpacing(8)
+        self.ch_label = QtWidgets.QLabel(ch)
+        self.ch_label.setFont(make_font(fonts, 14))
+        self.ch_label.setFixedWidth(16)
+        self.code_label = QtWidgets.QLabel(code.replace(".", "\u00b7").replace("-", "\u2212"))
+        self.code_label.setFont(make_font(fonts, 14, mono=True))
+        lay.addWidget(self.ch_label)
+        lay.addWidget(self.code_label, 1)
+        self._apply()
+
+    def set_state(self, state: str) -> None:
+        """``"match"``, ``"prefix"`` or ``""`` (see :func:`morse.reference.cell_state`)."""
+        if state == self.state:
+            return
+        self.state = state
+        self._apply()
+
+    def _apply(self) -> None:
+        t = self.theme
+        if self.state == "match":
+            r, g, b, a = t.trace_fill
+            bg, border, code = f"rgba({r},{g},{b},{a})", t.trace, t.ink
+        elif self.state == "prefix":
+            bg, border, code = t.panel2, t.line, t.ink2
+        else:
+            bg, border, code = "transparent", "transparent", t.ink2
+        self.setStyleSheet(f"QFrame {{ background: {bg}; border: 1px solid {border}; border-radius: 4px; }}")
+        self.ch_label.setStyleSheet(f"color: {t.ink}; font-weight: 600; border: 0; background: transparent;")
+        self.code_label.setStyleSheet(f"color: {code}; border: 0; background: transparent;")
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.ch)
+        super().mousePressEvent(event)
 
 
 # --------------------------------------------------------------- main window
@@ -1087,6 +1147,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(self._build_encode())
         root.addWidget(self._build_key())
         root.addWidget(self._build_practice())
+        root.addWidget(self._build_reference())
         root.addWidget(self._build_statusbar())
         self.setCentralWidget(central)
 
@@ -1734,6 +1795,88 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         return btn
 
+    def _build_reference(self) -> QtWidgets.QWidget:
+        """Section G: the Morse chart, lit by the letter in progress."""
+        t = self.theme
+        frame = QtWidgets.QFrame()
+        frame.setObjectName("encode")
+        lay = QtWidgets.QVBoxLayout(frame)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.ref_toggle = self._button("Show chart")
+        self.ref_toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.ref_toggle.clicked.connect(lambda: self._set_reference_open(not self._ref_open))
+        lay.addWidget(self._header("Reference", "\u00b7 Morse code chart; the letter being keyed or decoded "
+                                                "lights up", "G", extra=self.ref_toggle))
+        self.ref_body = QtWidgets.QWidget()
+        body_lay = QtWidgets.QVBoxLayout(self.ref_body)
+        body_lay.setContentsMargins(14, 8, 14, 12)
+        body_lay.setSpacing(8)
+        grid = QtWidgets.QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(4)
+        self.ref_cells: list[RefCell] = []
+        columns = 8
+        for i, (ch, code) in enumerate(reference.chart_entries()):
+            cell = RefCell(self.theme, self.fonts, ch, code)
+            cell.clicked.connect(self._play_reference)
+            grid.addWidget(cell, i // columns, i % columns)
+            self.ref_cells.append(cell)
+        body_lay.addLayout(grid)
+        note = QtWidgets.QLabel("Click a character to hear it at the encoder speed (and, with Feed the decoder on, "
+                                "to see it decoded). Built from the same table the decoder and encoder use: 26 "
+                                "letters, 10 digits and 16 punctuation marks. Cells light up as the letter under "
+                                "the key, or in the decoder, takes shape; the exact match stands out.")
+        note.setFont(self._font(12))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {t.ink3};")
+        body_lay.addWidget(note)
+        lay.addWidget(self.ref_body)
+        self._ref_open = False
+        self._ref_last_buffer: str | None = None
+        self._set_reference_open(load_reference_open(self.settings), persist=False)
+        return frame
+
+    def _set_reference_open(self, open_: bool, persist: bool = True) -> None:
+        self._ref_open = bool(open_)
+        self.ref_body.setVisible(self._ref_open)
+        self.ref_toggle.setText("Hide chart" if self._ref_open else "Show chart")
+        if persist:
+            self.settings.setValue(SETTINGS_REF_OPEN, "1" if self._ref_open else "0")
+        self._ref_last_buffer = None
+
+    def _refresh_reference(self) -> None:
+        """Light the cells the letter in progress could still become; the exact match stands out."""
+        if not self._ref_open:
+            return
+        lk = self._livekey
+        keyed = self._sent_dec.buffer if lk is not None and lk.running else ""
+        buffer = keyed or self.pipeline.decoder.buffer
+        if buffer == self._ref_last_buffer:
+            return
+        self._ref_last_buffer = buffer
+        for cell in self.ref_cells:
+            cell.set_state(reference.cell_state(cell.code, buffer))
+
+    def _play_reference(self, ch: str) -> None:
+        """Play one character at the encoder speed (and into the decoder feed when Feed is on)."""
+        self._stop_play()
+        timing = build_timing(ch, float(self.enc_wpm_spin.value()))
+        if not timing:
+            return
+        try:
+            samples = render_tone(timing, self.pipeline.f0, fs=DEFAULT_FS)
+            if self._player is None:
+                self._player = TonePlayer(fs=DEFAULT_FS)
+            self._player.play(samples)
+        except Exception as exc:  # no output device, PortAudio error
+            self.set_status_error(f"Play failed: {exc}")
+            return
+        self.set_status_error("")
+        if self.feed_check.isChecked() and self._source is not None:
+            self._inject = np.asarray(samples, dtype=np.float32)
+            self._inject_pos = 0
+
     def _build_practice(self) -> QtWidgets.QWidget:
         """Section F: key a target and get graded."""
         t = self.theme
@@ -2174,6 +2317,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_rail()
         self._refresh_key()
         self._refresh_practice()
+        self._refresh_reference()
         self._refresh_status()
 
     def _refresh_spectrum(self, blocks_this_tick: int) -> None:

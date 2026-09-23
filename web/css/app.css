@@ -356,6 +356,22 @@ button.ctl.key.big.down small { color: rgba(255, 255, 255, 0.85); }
 .k-label { font-size: 12px; color: var(--ink-2); letter-spacing: 0.04em; text-transform: uppercase; }
 .enc-out.sent { flex: 1 1 200px; min-height: 30px; font-size: 16px; }
 
+/* ---------- reference chart ---------- */
+.reference header .ctl { height: 24px; font-size: 12px; text-transform: none; letter-spacing: 0; padding: 0 10px; }
+.refbody { padding: 8px 14px 14px; display: grid; gap: 10px; }
+.refgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 4px 10px; }
+.refcell {
+  display: grid; grid-template-columns: 1.3em 1fr; align-items: baseline; gap: 8px; padding: 3px 8px;
+  border: 1px solid transparent; border-radius: 4px; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+}
+.refcell:hover { border-color: var(--line); background: var(--panel-2); }
+.refcell .ch { font-weight: 600; font-size: 14px; }
+.refcell .code { font-size: 14px; letter-spacing: 0.12em; color: var(--ink-2); }
+.refcell.prefix { background: var(--panel-2); border-color: var(--line); }
+.refcell.match { background: var(--trace-fill); border-color: var(--trace); }
+.refcell.match .code { color: var(--ink); }
+.refnote { font-size: 12px; color: var(--ink-3); }
+
 /* ---------- practice strip ---------- */
 .pr-target { font-size: 30px; font-weight: 600; letter-spacing: 0.18em; color: var(--ink); padding: 4px 0; min-height: 44px; }
 .pr-target.done { color: var(--good); }

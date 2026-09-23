@@ -618,3 +618,38 @@ def test_microphone_is_turned_down_while_the_page_sounds_with_feed_on(qapp, wind
     window._process_block(mic)
     assert mixed_peak() == pytest.approx(0.5, abs=0.01)
     window.feed_check.setChecked(True)
+
+
+def test_reference_chart_toggles_lights_and_plays(qapp, window: ui.MainWindow, settings, fake_sd) -> None:
+    from morse.reference import chart_entries
+
+    assert not window._ref_open and not window.ref_body.isVisibleTo(window)
+    assert len(window.ref_cells) == 52
+    assert [(c.ch, c.code) for c in window.ref_cells] == chart_entries()
+    window.ref_toggle.click()
+    assert window._ref_open and window.ref_body.isVisibleTo(window)
+    assert window.ref_toggle.text() == "Hide chart"
+    assert str(settings.value(ui.SETTINGS_REF_OPEN)) == "1"
+    # The decoder's letter in progress lights the cells it could still become.
+    window.pipeline.decoder.buffer = ".-"
+    window._refresh_reference()
+    states = {c.ch: c.state for c in window.ref_cells}
+    assert states["A"] == "match" and states["W"] == "prefix" and states["R"] == "prefix"
+    assert states["E"] == "" and states["T"] == ""
+    window.pipeline.decoder.buffer = ""
+    window._refresh_reference()
+    assert all(c.state == "" for c in window.ref_cells)
+    # Clicking a cell plays it and, with Feed on, injects it into the decoder.
+    fake_sd.play = lambda *a, **k: None  # type: ignore[attr-defined]
+    fake_sd.stop = lambda: None  # type: ignore[attr-defined]
+    window.ref_cells[0].clicked.emit("A")
+    assert window._inject is not None and window._inject.size > 0
+    assert window._play_started is None, "a chart character has no place on the keying guide"
+    window._inject = None
+    window.ref_toggle.click()
+    assert not window._ref_open and str(settings.value(ui.SETTINGS_REF_OPEN)) == "0"
+    other = ui.make_window(replay_args(), settings=settings)
+    try:
+        assert not other._ref_open
+    finally:
+        other.close()

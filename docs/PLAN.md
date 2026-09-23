@@ -355,3 +355,10 @@ verifying the site in Google Search Console and Bing Webmaster Tools (paste
 the tags into the marked place in `web/index.html`, then submit the sitemap),
 and any off-site links (a mention in ham-radio or maker forums) that tier 3
 would bring.
+
+## Reference chart (2026-09-23)
+
+Section G, a Morse code chart built from the shared table in both apps
+(v0.1.11): collapsed by default, lit by the letter in progress, click to hear.
+Chosen over a separate chart page (no live highlight) and over extending the
+Practice strip's Show the code (covers only the current target).

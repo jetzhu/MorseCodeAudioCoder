@@ -392,6 +392,14 @@
       </div>
     </section>
 
+    <section class="encode reference" aria-label="Morse code chart">
+      <header>Reference <span>· Morse code chart; the letter being keyed or decoded lights up</span><button class="ctl" id="refToggle" aria-expanded="false" aria-controls="refBody">Show chart</button><span class="tag">G</span></header>
+      <div class="refbody" id="refBody" hidden>
+        <div class="refgrid" id="refGrid" aria-label="Characters and their Morse code"></div>
+        <div class="refnote">Click a character to hear it at the encoder speed (and, with Feed the decoder on, to see it decoded). Built from the same table the decoder and encoder use: 26 letters, 10 digits and 16 punctuation marks. Cells light up as the letter under the key, or in the decoder, takes shape; the exact match stands out.</div>
+      </div>
+    </section>
+
     <div class="statusbar mono">
       <span><span class="dot" id="stateDot">○</span> <span id="stateV">Ready — press Start</span></span>
       <span id="blockV">10 ms blocks</span>
@@ -423,6 +431,7 @@
     <div class="note"><span class="tag">D</span><div><h3>Encode</h3><p>Farnsworth: set an overall speed below the character speed and the letters keep their rhythm while the gaps between them stretch (ARRL spacing), the standard way to learn by ear. Type English, read the Morse. Letters are separated by a space and words by a slash. The bar underneath is the keying guide: marks and gaps drawn to scale at the chosen speed, with each letter labelled, so you can follow it while pressing the button. Play keys the tone through the speakers and runs a playhead along the guide. With Feed the decoder on, the decoder listens to the page's own signal while it plays: the microphone is turned down 40 dB in the decoder's input and returns 0.4 s after the sound stops, so a raw microphone's delayed echo of the speakers cannot fill the gaps. A recording of the speakers played back later still decodes, since the page is silent then.</p></div></div>
     <div class="note"><span class="tag">E</span><div><h3>Key</h3><p>Send Morse yourself. Single key: hold Space or the big button and the tone sounds while held, exactly like a straight key. Two keys: the left arrow sends dits and the right arrow dahs, timed at the encoder speed and repeating while held, like an electronic keyer, in iambic mode A or B. Bug: automatic dits, hand-made dahs, like a Vibroplex. Dah ratio (dits per dah) and weight (longer marks, shorter spaces) shape the elements. Change key under a button picks any other keyboard key, and the choice is kept in this browser. The sidetone is the pitch you hear (600 Hz by default, easier on the ear than a 2.5 kHz beeper); the decoder is always fed the beeper frequency. The Sent line reads back what you keyed even when the decoder is not listening.</p></div></div>
     <div class="note"><span class="tag">F</span><div><h3>Practice</h3><p>Pick a drill, press Next target, key the word with the Key strip. When the Sent line matches, the target is marked correct; otherwise press Check to see the edit distance, your speed and how far your marks and gaps sit from the ideal proportions. Show the code reveals the dots and dashes while you learn.</p></div></div>
+    <div class="note"><span class="tag">G</span><div><h3>Reference</h3><p>A Morse code chart built from the same table the decoder and encoder use: letters, digits and punctuation with their dots and dashes. Open it with Show chart. As you key, or as the decoder builds a letter, every character the dots and dashes so far could still become lights up and the exact match stands out, so you can see where a letter is heading. Click a character to hear it at the encoder speed.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>
@@ -456,7 +465,7 @@
           and can space it Farnsworth-style for learning. The Key strip makes the keyboard a straight key, an
           iambic keyer with mode A or B, or a bug, with a sidetone, adjustable dah ratio and weight, and keys
           you can rebind. The Practice strip hands out words, call signs and number groups and grades your
-          copy and rhythm. The decoded log, with the time each word arrived, can be downloaded.</p>
+          copy and rhythm. The decoded log, with the time each word arrived, can be downloaded. A Morse code chart at the bottom of the console lists the 26 letters, 10 digits and the punctuation marks . , ? / = ' ( ) : ; + - _ " @ ! with their codes; the letter being keyed or decoded lights up in it, and clicking a character plays it.</p>
         <h3>Privacy</h3>
         <p>Everything runs in this browser tab. No audio, text or settings are sent anywhere; the only network
           requests are for the fonts and the release list of the desktop app on GitHub.</p>

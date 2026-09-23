@@ -491,6 +491,16 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Reference chart (2026-09-23, v0.1.11): section G in both apps, built from
+  `morse/reference.py` / `web/js/reference.js` (`chart_entries(table)`:
+  letters, digits, then punctuation by code length, code, character;
+  `cell_state(code, buffer)` -> `"match" | "prefix" | ""`). Collapsed behind
+  Show chart (QSettings `reference/open`, localStorage
+  `morse.reference.open`). While open, the cells the letter in progress could
+  still become are lit (the hand key's Sent buffer while the key runs, else
+  the decoder's buffer) and the exact match stands out; clicking a cell plays
+  the character at the encoder speed through the speakers and, with Feed on,
+  into the decoder (no keying-guide playhead).
 - Mic gate (2026-09-23, v0.1.10): `MicGate` in `morse/player.py` and
   `web/js/audio.js` (`update(sounding, now_ms) -> bool`, `active`, `reset`,
   tail `MIC_GATE_TAIL_MS` 400 ms, gain `MIC_GATE_GAIN` 0.01). With Feed on

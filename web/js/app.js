@@ -25,6 +25,7 @@ import { Keyer, LiveKey } from "./keyer.js";
 import { DecodedLog, defaultFilename } from "./declog.js";
 import { DEFAULTS as BINDING_DEFAULTS, RESERVED_CODES, actionFor, isDefault as bindingsAreDefault, keyLabel, rebind, sanitize as sanitizeBindings } from "./bindings.js";
 import { Practice, rhythm, score } from "./practice.js";
+import { cellState, chartEntries } from "./reference.js";
 import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
@@ -96,6 +97,7 @@ const el = {
   keyBtn: $("keyBtn"), ditBtn: $("ditBtn"), dahBtn: $("dahBtn"),
   keyRebind: $("keyRebind"), ditRebind: $("ditRebind"), dahRebind: $("dahRebind"), keyReset: $("keyReset"),
   keySidetone: $("keySidetone"), keySide: $("keySide"),
+  refToggle: $("refToggle"), refBody: $("refBody"), refGrid: $("refGrid"),
   sentOut: $("sentOut"), sentClear: $("sentClear"), keySpeed: $("keySpeed"), keyDit: $("keyDit"),
   prWords: $("prWords"), prCalls: $("prCalls"), prDigits: $("prDigits"), prMixed: $("prMixed"),
   prNext: $("prNext"), prCheck: $("prCheck"), prShowCode: $("prShowCode"), prTarget: $("prTarget"), prCode: $("prCode"),
@@ -1242,11 +1244,12 @@ function updateMicGate() {
 }
 
 player.onProgress = (ms) => {
-  encoder.playheadMs = ms;
+  if (!ref.playing) encoder.playheadMs = ms; // a chart character has no place on the keying guide
   dirty = true;
 };
 player.onEnd = () => {
   encoder.playheadMs = null;
+  ref.playing = false;
   el.encPlay.textContent = "Play tone";
   updateMicGate();
   dirty = true;
@@ -1269,6 +1272,7 @@ const STORE_SIDETONE = "morse.key.sidetone";
 const STORE_IAMBIC = "morse.key.iambic";
 const STORE_RATIO = "morse.key.ratio";
 const STORE_WEIGHT = "morse.key.weight";
+const STORE_REF_OPEN = "morse.reference.open";
 const DEFAULT_SIDETONE_HZ = 600;
 let bindings = loadBindings();
 /** The action whose key is being chosen after Change key, else null. @type {"key" | "dit" | "dah" | null} */
@@ -1511,6 +1515,66 @@ function clearSent() {
   dirty = true;
 }
 
+// -------------------------------------------------------------- reference
+
+/** The Morse chart (section G): built from the shared table, lit by the letter in progress. */
+const ref = { cells: /** @type {HTMLElement[]} */ ([]), lastBuffer: /** @type {string | null} */ (null), playing: false };
+
+function buildReference() {
+  el.refGrid.textContent = "";
+  ref.cells = [];
+  for (const [ch, code] of chartEntries()) {
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "refcell";
+    cell.dataset.code = code;
+    cell.title = `Play ${ch}`;
+    cell.innerHTML = `<span class="ch">${escapeHtml(ch)}</span><span class="code mono">${code.replace(/\./g, "·").replace(/-/g, "−")}</span>`;
+    cell.addEventListener("click", () => playReference(ch));
+    el.refGrid.appendChild(cell);
+    ref.cells.push(cell);
+  }
+}
+
+function setReferenceOpen(open, persist = true) {
+  el.refBody.hidden = !open;
+  el.refToggle.textContent = open ? "Hide chart" : "Show chart";
+  el.refToggle.setAttribute("aria-expanded", String(open));
+  if (persist) store.set(STORE_REF_OPEN, open ? "1" : "0");
+  ref.lastBuffer = null;
+  dirty = true;
+}
+
+/** Light the cells the letter in progress could still become; the exact match stands out. */
+function updateReferenceDom() {
+  if (el.refBody.hidden) return;
+  const keyed = liveKey.running ? sent.dec.buffer : "";
+  const buffer = keyed || (state.running ? decoder.buffer : "");
+  if (buffer === ref.lastBuffer) return;
+  ref.lastBuffer = buffer;
+  for (const cell of ref.cells) {
+    const s = cellState(cell.dataset.code || "", buffer);
+    cell.classList.toggle("match", s === "match");
+    cell.classList.toggle("prefix", s === "prefix");
+  }
+}
+
+/** Play one character at the encoder speed through the speakers (and the feed while listening). */
+function playReference(ch) {
+  try {
+    player.audioContext = ensureContext();
+    syncPlayerFeed();
+    ref.playing = true;
+    encoder.playheadMs = null;
+    player.play(buildGuide(ch, encoder.wpm).timing, state.f0, 0.15);
+    el.encPlay.textContent = "Play tone";
+    updateMicGate();
+  } catch {
+    ref.playing = false;
+  }
+  dirty = true;
+}
+
 // --------------------------------------------------------------- practice
 
 const practice = new Practice("words");
@@ -1592,6 +1656,7 @@ function updateKeyDom() {
   const text = sent.dec.text.length > 60 ? `…${sent.dec.text.slice(-60)}` : sent.dec.text;
   el.sentOut.innerHTML = escapeHtml(text) + (shown ? `<span class="sep"> ${shown}</span>` : "") || "&nbsp;";
   updatePracticeDom();
+  updateReferenceDom();
   // Keep redrawing while the tone sounds and while a letter is still pending, so
   // trackSent keeps reporting the growing silence and the decoder can close the
   // letter (seven dit lengths) with no further input, even when the main decoder
@@ -1764,6 +1829,9 @@ function wire() {
   el.keyWeight.addEventListener("input", () => applyWeighting(true));
   el.iambicA.disabled = keyer.mode !== "paddle";
   el.iambicB.disabled = keyer.mode !== "paddle";
+  buildReference();
+  setReferenceOpen(store.get(STORE_REF_OPEN) === "1", false);
+  el.refToggle.addEventListener("click", () => setReferenceOpen(el.refBody.hidden));
   bindKeyButton(el.keyBtn, () => liveKey.keyDown(), () => liveKey.keyUp());
   bindKeyButton(el.ditBtn, () => liveKey.paddleDown("dit"), () => liveKey.paddleUp("dit"));
   bindKeyButton(el.dahBtn, () => liveKey.paddleDown("dah"), () => liveKey.paddleUp("dah"));

@@ -45,6 +45,14 @@ is remembered between runs. **Sidetone** is the pitch you hear while keying,
 the beeper frequency itself. The decoder is always fed the beeper frequency,
 so the sidetone never affects decoding.
 
+## Reference chart
+
+Section G at the bottom of the console is a Morse code chart built from the
+same table the decoder and encoder use. Open it with Show chart. As you key,
+or as the decoder builds a letter, the characters the dots and dashes so far
+could still become light up and the exact match stands out. Click a character
+to hear it at the encoder speed.
+
 ## Save the decoded log
 
 **Save log** (desktop) and **Download log** (web) write what was decoded as
