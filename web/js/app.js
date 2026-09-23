@@ -22,6 +22,7 @@ import { MorseDecoder } from "./decoder.js";
 import { TonePlayer, buildGuide, farnsworthGaps, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
 import { Keyer, LiveKey } from "./keyer.js";
+import { DEFAULTS as BINDING_DEFAULTS, RESERVED_CODES, actionFor, isDefault as bindingsAreDefault, keyLabel, rebind, sanitize as sanitizeBindings } from "./bindings.js";
 import { Practice, rhythm, score } from "./practice.js";
 import { Run } from "./runs.js";
 
@@ -91,6 +92,8 @@ const el = {
   keyStraight: $("keyStraight"), keyPaddle: $("keyPaddle"), keyPill: $("keyPill"), keyHelp: $("keyHelp"),
   keypadStraight: $("keypadStraight"), keypadPaddle: $("keypadPaddle"),
   keyBtn: $("keyBtn"), ditBtn: $("ditBtn"), dahBtn: $("dahBtn"),
+  keyRebind: $("keyRebind"), ditRebind: $("ditRebind"), dahRebind: $("dahRebind"), keyReset: $("keyReset"),
+  keySidetone: $("keySidetone"), keySide: $("keySide"),
   sentOut: $("sentOut"), sentClear: $("sentClear"), keySpeed: $("keySpeed"), keyDit: $("keyDit"),
   prWords: $("prWords"), prCalls: $("prCalls"), prDigits: $("prDigits"), prMixed: $("prMixed"),
   prNext: $("prNext"), prCheck: $("prCheck"), prShowCode: $("prShowCode"), prTarget: $("prTarget"), prCode: $("prCode"),
@@ -394,6 +397,7 @@ function applyFrequency(f0) {
   el.f0Label.textContent = `${value} Hz`;
   el.encTone.innerHTML = `${value}<small>Hz</small>`;
   if (liveKey.running) liveKey.setFrequency(value);
+  if (el.keySide) applySidetone(false);
   el.factTone.textContent = `${value} Hz`;
   store.set(STORAGE.f0, String(value));
   if (mic) {
@@ -1181,12 +1185,87 @@ liveKey.onChange = () => {
 };
 /** Local reading of what the operator keyed, independent of the decoder above. */
 const sent = { dec: new MorseDecoder(), index: 0, lastT: null, lastOn: false, /** @type {Run[]} */ runs: [] };
-const KEY_HELP = {
-  straight: "Hold <b>Space</b> or the button: the tone sounds while it is held.",
-  paddle: "<b>&larr;</b> sends dits and <b>&rarr;</b> sends dahs at the encoder speed; hold to repeat, hold both to alternate.",
-};
-/** Keyboard codes: [mode the key belongs to, paddle or null for the straight key]. */
-const KEY_CODES = { Space: ["straight", null], ArrowLeft: ["paddle", "dit"], ArrowRight: ["paddle", "dah"] };
+/** Which keyboard key works the straight key and each paddle; kept in this browser. */
+const STORE_BINDINGS = "morse.key.bindings";
+const STORE_SIDETONE = "morse.key.sidetone";
+const DEFAULT_SIDETONE_HZ = 600;
+let bindings = loadBindings();
+/** The action whose key is being chosen after Change key, else null. @type {"key" | "dit" | "dah" | null} */
+let capture = null;
+/** Code whose release must not key anything (it was just captured). @type {string | null} */
+let swallowRelease = null;
+const ACTION_TITLES = { key: "the key", dit: "Dit", dah: "Dah" };
+const ACTION_BUTTONS = () => ({ key: el.keyBtn, dit: el.ditBtn, dah: el.dahBtn });
+
+function loadBindings() {
+  try {
+    return sanitizeBindings(JSON.parse(store.get(STORE_BINDINGS) || "null"));
+  } catch {
+    return { ...BINDING_DEFAULTS };
+  }
+}
+
+function saveBindings() {
+  store.set(STORE_BINDINGS, JSON.stringify(bindings));
+}
+
+function keyHelpText(mode) {
+  const b = (a) => `<b>${escapeHtml(keyLabel(bindings[a]))}</b>`;
+  return mode === "paddle"
+    ? `${b("dit")} sends dits and ${b("dah")} sends dahs at the encoder speed; hold to repeat, hold both to alternate.`
+    : `Hold ${b("key")} or the button: the tone sounds while it is held.`;
+}
+
+/** Button captions, help line and Reset state after a binding change. */
+function renderBindings() {
+  el.keyBtn.innerHTML = `Key<small>${escapeHtml(keyLabel(bindings.key))}</small>`;
+  el.ditBtn.innerHTML = `Dit<small>${escapeHtml(keyLabel(bindings.dit))}</small>`;
+  el.dahBtn.innerHTML = `Dah<small>${escapeHtml(keyLabel(bindings.dah))}</small>`;
+  el.keyReset.disabled = bindingsAreDefault(bindings);
+  for (const [action, btn] of Object.entries({ key: el.keyRebind, dit: el.ditRebind, dah: el.dahRebind })) {
+    btn.classList.toggle("armed", capture === action);
+    btn.textContent = capture === action ? "Press a key\u2026" : "Change key";
+  }
+  el.keyHelp.classList.toggle("capture", capture !== null);
+  el.keyHelp.innerHTML = capture
+    ? `Press the key that should work <b>${ACTION_TITLES[capture]}</b> (Esc keeps the current one)`
+    : keyHelpText(keyer.mode);
+}
+
+function startCapture(action) {
+  capture = capture === action ? null : action;
+  renderBindings();
+}
+
+function finishCapture(code) {
+  const action = capture;
+  capture = null;
+  if (action && code) {
+    bindings = rebind(bindings, action, code);
+    saveBindings();
+  }
+  renderBindings();
+}
+
+function resetBindings() {
+  capture = null;
+  bindings = { ...BINDING_DEFAULTS };
+  saveBindings();
+  renderBindings();
+}
+
+/** Sidetone pitch from the field: a number in range, or null to follow the beeper frequency. */
+function readSidetone() {
+  const v = parseFloat(el.keySidetone.value);
+  return Number.isFinite(v) && v >= 100 && v <= 4000 ? v : null;
+}
+
+function applySidetone(persist) {
+  const hz = readSidetone();
+  liveKey.setSidetone(hz);
+  el.keySide.innerHTML = hz === null ? `${Math.round(state.f0)}<small>Hz (tone)</small>` : `${Math.round(hz)}<small>Hz</small>`;
+  if (persist) store.set(STORE_SIDETONE, hz === null ? "" : String(hz));
+}
 
 function ensureLiveKey() {
   try {
@@ -1207,7 +1286,8 @@ function setKeyMode(mode) {
   el.keyPaddle.setAttribute("aria-pressed", String(paddle));
   el.keypadStraight.hidden = paddle;
   el.keypadPaddle.hidden = !paddle;
-  el.keyHelp.innerHTML = KEY_HELP[mode];
+  capture = null;
+  renderBindings();
   for (const b of [el.keyBtn, el.ditBtn, el.dahBtn]) b.classList.remove("down");
   dirty = true;
 }
@@ -1224,24 +1304,45 @@ function isTypingTarget(target) {
   return tag === "input" || tag === "textarea" || tag === "select" || Boolean(target.isContentEditable);
 }
 
-/** Keyboard key or paddle: Space in single-key mode, the arrows in two-key mode. */
+/**
+ * Keyboard: the bound keys work the straight key (single-key mode) or the
+ * paddles (two-key mode). While Change key is armed the next press is captured
+ * instead: Esc cancels, modifiers are ignored, and the captured key's release
+ * is swallowed so it does not key anything.
+ */
 function onKeyboard(e, down) {
-  const spec = KEY_CODES[e.code];
-  if (!spec || isTypingTarget(e.target)) return;
-  const [mode, paddle] = spec;
+  if (isTypingTarget(e.target)) return;
+  if (capture !== null) {
+    e.preventDefault();
+    if (!down || e.repeat) return;
+    if (e.code === "Escape") finishCapture(null);
+    else if (e.code && !RESERVED_CODES.has(e.code)) {
+      swallowRelease = e.code;
+      finishCapture(e.code);
+    }
+    return;
+  }
+  if (swallowRelease !== null && e.code === swallowRelease) {
+    e.preventDefault();
+    if (!down) swallowRelease = null;
+    return;
+  }
+  const action = actionFor(bindings, e.code);
+  if (!action) return;
+  const mode = action === "key" ? "straight" : "paddle";
   if (keyer.mode !== mode) return;
   e.preventDefault();
   if (down && e.repeat) return;
   if (down && !ensureLiveKey()) return;
   if (!liveKey.running) return;
-  if (mode === "straight") {
+  if (action === "key") {
     if (down) liveKey.keyDown();
     else liveKey.keyUp();
     el.keyBtn.classList.toggle("down", down);
   } else {
-    if (down) liveKey.paddleDown(paddle);
-    else liveKey.paddleUp(paddle);
-    (paddle === "dit" ? el.ditBtn : el.dahBtn).classList.toggle("down", down);
+    if (down) liveKey.paddleDown(action);
+    else liveKey.paddleUp(action);
+    ACTION_BUTTONS()[action].classList.toggle("down", down);
   }
   dirty = true;
 }
@@ -1536,6 +1637,16 @@ function wire() {
   bindKeyButton(el.dahBtn, () => liveKey.paddleDown("dah"), () => liveKey.paddleUp("dah"));
   window.addEventListener("keydown", (e) => onKeyboard(e, true));
   window.addEventListener("keyup", (e) => onKeyboard(e, false));
+  el.keyRebind.addEventListener("click", () => startCapture("key"));
+  el.ditRebind.addEventListener("click", () => startCapture("dit"));
+  el.dahRebind.addEventListener("click", () => startCapture("dah"));
+  el.keyReset.addEventListener("click", resetBindings);
+  const storedSidetone = store.get(STORE_SIDETONE);
+  if (storedSidetone !== null) el.keySidetone.value = storedSidetone;
+  else el.keySidetone.value = String(DEFAULT_SIDETONE_HZ);
+  applySidetone(false);
+  el.keySidetone.addEventListener("input", () => applySidetone(true));
+  renderBindings();
   window.addEventListener("blur", releaseKeys);
   el.sentClear.addEventListener("click", clearSent);
   for (const [kind, id] of Object.entries(KIND_BUTTON)) el[id].addEventListener("click", () => setPracticeKind(kind));

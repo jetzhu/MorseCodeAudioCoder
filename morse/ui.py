@@ -34,6 +34,7 @@ Public entry points: :func:`run_ui`, :func:`make_window`, :func:`ensure_app`,
 from __future__ import annotations
 
 import html
+import json
 import math
 import sys
 import time
@@ -52,6 +53,7 @@ from morse import table
 from morse.decoder import MorseDecoder
 from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
+from morse import bindings as keybind
 from morse import practice
 from morse.keyer import Keyer, LiveKey
 from morse.runs import Run
@@ -809,6 +811,67 @@ class Readout(QtWidgets.QWidget):
         self.value.setText(html.escape(text) + small)
 
 
+# ------------------------------------------------------------ preferences
+
+SETTINGS_BINDINGS = "key/bindings"
+"""QSettings key: the hand key's bindings as a JSON object (see :mod:`morse.bindings`)."""
+SETTINGS_SIDETONE = "key/sidetone_hz"
+"""QSettings key: sidetone pitch in Hz; 0 follows the beeper frequency."""
+DEFAULT_SIDETONE_HZ = 600
+"""A comfortable pitch to key with; the beeper's 2491 Hz is shrill to sit next to."""
+SIDETONE_MAX_HZ = 4000
+ACTION_TITLES = {"key": "the key", "dit": "Dit", "dah": "Dah"}
+MODIFIER_KEYS = frozenset({
+    Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_AltGr, Qt.Key.Key_Meta,
+    Qt.Key.Key_Super_L, Qt.Key.Key_Super_R, Qt.Key.Key_CapsLock, Qt.Key.Key_NumLock,
+    Qt.Key.Key_ScrollLock, Qt.Key.Key_unknown,
+})
+_KEY_LABELS = {"Space": "Space", "Left": "← left arrow", "Right": "→ right arrow", "Up": "↑ up arrow",
+               "Down": "↓ down arrow", "Return": "Enter", "Enter": "Enter (numpad)"}
+
+
+def default_settings() -> QtCore.QSettings:
+    """The platform preference store for this app (registry on Windows, INI elsewhere)."""
+    return QtCore.QSettings(QtCore.QSettings.Scope.UserScope, "MorseConsole", "Beeper Morse Console")
+
+
+def key_name(key: int) -> str:
+    """Qt's portable name for a key (``"Space"``, ``"Left"``, ``"J"``); ``""`` for unknown keys."""
+    if key in (Qt.Key.Key_unknown, 0):
+        return ""
+    return QtGui.QKeySequence(key).toString(QtGui.QKeySequence.SequenceFormat.PortableText)
+
+
+def key_label(name: str) -> str:
+    """What the buttons show for a key name."""
+    return _KEY_LABELS.get(name, name)
+
+
+def load_bindings(settings: QtCore.QSettings) -> dict[str, str]:
+    """Bindings from ``settings``, repaired against the defaults; defaults when absent or unreadable."""
+    raw = settings.value(SETTINGS_BINDINGS, "")
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) and raw else None
+    except ValueError:
+        parsed = None
+    return keybind.sanitize(parsed)
+
+
+def save_bindings(settings: QtCore.QSettings, bindings: dict[str, str]) -> None:
+    settings.setValue(SETTINGS_BINDINGS, json.dumps(bindings, sort_keys=True))
+    settings.sync()
+
+
+def load_sidetone(settings: QtCore.QSettings) -> int:
+    """Sidetone pitch in Hz from ``settings`` (0 = follow the tone), default 600."""
+    raw = settings.value(SETTINGS_SIDETONE, DEFAULT_SIDETONE_HZ)
+    try:
+        value = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_SIDETONE_HZ
+    return value if 0 <= value <= SIDETONE_MAX_HZ else DEFAULT_SIDETONE_HZ
+
+
 # --------------------------------------------------------------- main window
 
 
@@ -829,9 +892,13 @@ class MainWindow(QtWidgets.QMainWindow):
         fonts: Fonts | None = None,
         *,
         manual_wpm: float | None = None,
+        settings: QtCore.QSettings | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Persistent preferences (key bindings, sidetone). The default store is
+        # the platform one (registry on Windows); tests pass an INI file.
+        self.settings: QtCore.QSettings = settings if settings is not None else default_settings()
         self.theme = theme or pick_theme()
         self.fonts = fonts or pick_fonts()
         self.pipeline = pipeline
@@ -876,6 +943,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # two paddles on the arrow keys. The output stream opens on first use.
         self._keyer = Keyer(1200.0 / 8.0, "straight")
         self._livekey: LiveKey | None = None
+        self._bindings: dict[str, str] = load_bindings(self.settings)
+        self._sidetone_hz: int = load_sidetone(self.settings)
+        self._capture_action: str | None = None  # the action whose key is being chosen
+        self._swallow_release: str | None = None  # key name whose next release ends a capture
         self._sent_dec = MorseDecoder()
         self._sent_index: int = 0
         self._sent_last: tuple[float, bool] | None = None
@@ -1431,28 +1502,55 @@ class MainWindow(QtWidgets.QMainWindow):
         self.key_straight.clicked.connect(lambda: self._on_key_mode("straight"))
         self.key_paddle.clicked.connect(lambda: self._on_key_mode("paddle"))
         row.addWidget(seg)
+        row.addWidget(self._field_label("Sidetone"))
+        self.sidetone_spin = self._spin(0, SIDETONE_MAX_HZ, self._sidetone_hz, width=72)
+        self.sidetone_spin.setSpecialValueText("tone")
+        self.sidetone_spin.setToolTip("Pitch you hear while keying. \"tone\" (0) follows the beeper frequency "
+                                      "above. The decoder feed always uses the beeper frequency.")
+        self.sidetone_spin.valueChanged.connect(self._on_sidetone_changed)
+        row.addWidget(self.sidetone_spin)
+        row.addWidget(self._label("Hz", 13, t.ink3, mono=True))
         self.key_pill = Pill(self.theme, self.fonts, labels=("SENDING", "SILENT"))
         row.addWidget(self.key_pill)
         self.key_help = self._label("", 12, t.ink2)
         self.key_help.setTextFormat(Qt.TextFormat.RichText)
         row.addWidget(self.key_help, 1)
+        self.key_reset_button = self._button("Reset keys")
+        self.key_reset_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.key_reset_button.setToolTip("Back to Space, left arrow and right arrow")
+        self.key_reset_button.clicked.connect(self._reset_bindings)
+        row.addWidget(self.key_reset_button)
         left_lay.addLayout(row)
 
         pad = QtWidgets.QHBoxLayout()
         pad.setSpacing(12)
-        self.key_button = self._key_button("Key", "Space")
-        self.dit_button = self._key_button("Dit", "← left arrow")
-        self.dah_button = self._key_button("Dah", "→ right arrow")
+        self.key_button = self._key_button("Key", "")
+        self.dit_button = self._key_button("Dit", "")
+        self.dah_button = self._key_button("Dah", "")
         self.key_button.pressed.connect(lambda: self._on_key_button(True, None))
         self.key_button.released.connect(lambda: self._on_key_button(False, None))
         self.dit_button.pressed.connect(lambda: self._on_key_button(True, "dit"))
         self.dit_button.released.connect(lambda: self._on_key_button(False, "dit"))
         self.dah_button.pressed.connect(lambda: self._on_key_button(True, "dah"))
         self.dah_button.released.connect(lambda: self._on_key_button(False, "dah"))
-        for b in (self.key_button, self.dit_button, self.dah_button):
-            pad.addWidget(b)
+        self.key_rebind = self._rebind_button("key")
+        self.dit_rebind = self._rebind_button("dit")
+        self.dah_rebind = self._rebind_button("dah")
+        self.key_columns: dict[str, QtWidgets.QWidget] = {}
+        for action, big, small in (("key", self.key_button, self.key_rebind),
+                                   ("dit", self.dit_button, self.dit_rebind),
+                                   ("dah", self.dah_button, self.dah_rebind)):
+            col = QtWidgets.QWidget()
+            col_lay = QtWidgets.QVBoxLayout(col)
+            col_lay.setContentsMargins(0, 0, 0, 0)
+            col_lay.setSpacing(2)
+            col_lay.addWidget(big)
+            col_lay.addWidget(small, 0, Qt.AlignmentFlag.AlignHCenter)
+            self.key_columns[action] = col
+            pad.addWidget(col)
         pad.addStretch(1)
         left_lay.addLayout(pad)
+        self._refresh_key_hints()
 
         sent_row = QtWidgets.QHBoxLayout()
         sent_row.setSpacing(10)
@@ -1478,15 +1576,16 @@ class MainWindow(QtWidgets.QMainWindow):
         right_lay.setContentsMargins(14, 12, 14, 12)
         right_lay.setSpacing(10)
         self.key_readouts: dict[str, Readout] = {}
-        for key in ("Speed", "Dit · dah"):
+        for key in ("Speed", "Dit · dah", "Sidetone"):
             ro = Readout(self.theme, self.fonts, key)
             self.key_readouts[key] = ro
             right_lay.addWidget(ro)
         note = QtWidgets.QLabel("Two keys work like an electronic keyer: each press sends one correctly timed "
                                 "element at the encoder speed, repeats while held, holding both alternates, "
-                                "and a tap during an element is remembered. Sent is read from your keying "
-                                "itself; with Feed the decoder on and a source open, the decoder above reads "
-                                "it too.")
+                                "and a tap during an element is remembered. Change key picks another "
+                                "keyboard key; the choice is remembered. You hear the sidetone; the decoder "
+                                "is fed the beeper frequency. Sent is read from your keying itself; with Feed "
+                                "the decoder on and a source open, the decoder above reads it too.")
         note.setFont(self._font(12))
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {t.ink3};")
@@ -1496,6 +1595,21 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addWidget(body)
         self._apply_key_mode_ui("straight")
         return frame
+
+    def _rebind_button(self, action: str) -> QtWidgets.QPushButton:
+        """The small "Change key" link under a key button."""
+        t = self.theme
+        btn = QtWidgets.QPushButton("Change key")
+        btn.setObjectName("link")
+        btn.setFlat(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setFont(self._font(11))
+        btn.setStyleSheet(f"QPushButton {{ color: {t.ink3}; border: 0; padding: 2px 6px; background: transparent; }}"
+                          f"QPushButton:hover {{ color: {t.ink}; text-decoration: underline; }}")
+        btn.setToolTip(f"Press this, then the keyboard key that should work the {action}")
+        btn.clicked.connect(lambda: self._start_capture(action))
+        return btn
 
     def _key_button(self, title: str, hint: str) -> QtWidgets.QPushButton:
         """A large press-and-hold key button; keyboard focus stays with the window."""
@@ -2290,11 +2404,51 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ---------------------------------------------------------------- key
 
-    _KEY_HELP = {
-        "straight": "Hold <b>Space</b> or the button: the tone sounds while it is held.",
-        "paddle": "<b>←</b> sends dits and <b>→</b> sends dahs at the encoder speed; "
-                  "hold to repeat, hold both to alternate.",
-    }
+    def _key_help_text(self, mode: str) -> str:
+        b = self._bindings
+        if mode == "paddle":
+            return (f"<b>{html.escape(key_label(b['dit']))}</b> sends dits and "
+                    f"<b>{html.escape(key_label(b['dah']))}</b> sends dahs at the encoder speed; "
+                    "hold to repeat, hold both to alternate.")
+        return f"Hold <b>{html.escape(key_label(b['key']))}</b> or the button: the tone sounds while it is held."
+
+    # ------------------------------------------------------- key bindings
+
+    def _refresh_key_hints(self) -> None:
+        """Button captions, help line and Reset state after a binding change."""
+        b = self._bindings
+        self.key_button.setText(f"Key\n{key_label(b['key'])}")
+        self.dit_button.setText(f"Dit\n{key_label(b['dit'])}")
+        self.dah_button.setText(f"Dah\n{key_label(b['dah'])}")
+        self.key_reset_button.setEnabled(not keybind.is_default(b))
+        if hasattr(self, "key_help") and self._capture_action is None:
+            self.key_help.setText(self._key_help_text(self._keyer.mode))
+
+    def _start_capture(self, action: str) -> None:
+        """Next key press becomes the binding for ``action``; Esc cancels."""
+        self._capture_action = action
+        self.key_help.setText(f"Press the key that should work <b>{ACTION_TITLES[action]}</b> "
+                              "(Esc keeps the current one)")
+
+    def _finish_capture(self, key_name: str | None) -> None:
+        action, self._capture_action = self._capture_action, None
+        if action is not None and key_name:
+            self._bindings = keybind.rebind(self._bindings, action, key_name)
+            save_bindings(self.settings, self._bindings)
+        self._refresh_key_hints()
+
+    def _reset_bindings(self) -> None:
+        self._capture_action = None
+        self._bindings = dict(keybind.DEFAULTS)
+        save_bindings(self.settings, self._bindings)
+        self._refresh_key_hints()
+
+    def _on_sidetone_changed(self, value: int) -> None:
+        self._sidetone_hz = int(value)
+        self.settings.setValue(SETTINGS_SIDETONE, self._sidetone_hz)
+        if self._livekey is not None:
+            self._livekey.set_sidetone(float(self._sidetone_hz) or None)
+        self._refresh_key_readouts()
 
     def _ensure_livekey(self) -> bool:
         """Open the key's output stream on first use; False (with a status message) on failure."""
@@ -2304,6 +2458,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._livekey is None:
                 self._livekey = LiveKey(self._keyer, f0=self.pipeline.f0, fs=DEFAULT_FS)
             self._livekey.set_frequency(self.pipeline.f0)
+            self._livekey.set_sidetone(float(self._sidetone_hz) or None)
             self._livekey.set_speed(1200.0 / float(self.enc_wpm_spin.value()))
             self._livekey.start()
         except Exception as exc:  # no output device, PortAudio error
@@ -2314,10 +2469,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_key_mode_ui(self, mode: str) -> None:
         paddle = mode == "paddle"
-        self.key_button.setVisible(not paddle)
-        self.dit_button.setVisible(paddle)
-        self.dah_button.setVisible(paddle)
-        self.key_help.setText(self._KEY_HELP[mode])
+        self.key_columns["key"].setVisible(not paddle)
+        self.key_columns["dit"].setVisible(paddle)
+        self.key_columns["dah"].setVisible(paddle)
+        self._capture_action = None
+        self.key_help.setText(self._key_help_text(mode))
         for b in (self.key_button, self.dit_button, self.dah_button):
             b.setDown(False)
         self._refresh_key_readouts()
@@ -2344,6 +2500,10 @@ class MainWindow(QtWidgets.QMainWindow):
         dit = 1200.0 / wpm
         self.key_readouts["Speed"].set_value(f"{wpm:.0f}", "WPM")
         self.key_readouts["Dit · dah"].set_value(f"{round(dit)} · {round(3 * dit)} ms")
+        if self._sidetone_hz:
+            self.key_readouts["Sidetone"].set_value(f"{self._sidetone_hz}", "Hz")
+        else:
+            self.key_readouts["Sidetone"].set_value(f"{self.pipeline.f0:.0f}", "Hz (tone)")
 
     def _on_key_button(self, down: bool, which: str | None) -> None:
         """Mouse press or release on a key button (``which`` None = straight key)."""
@@ -2359,19 +2519,39 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_key()
 
     def _handle_key_event(self, event: QtGui.QKeyEvent, down: bool) -> bool:
-        """Space keys the straight key; the arrows work the paddles. True when handled."""
+        """The bound keys work the straight key and the paddles. True when handled.
+
+        While a binding is being chosen (Change key), the next press is
+        captured instead: Esc cancels, modifier keys are ignored, and the
+        release of the captured key is swallowed so it does not key anything.
+        """
         focus = QtWidgets.QApplication.focusWidget()
         if isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QAbstractSpinBox, QtWidgets.QComboBox,
                               QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
             return False
         key = event.key()
+        name = key_name(key)
+        if self._capture_action is not None:
+            if not down or event.isAutoRepeat():
+                return True
+            if key == Qt.Key.Key_Escape:
+                self._finish_capture(None)
+            elif name and key not in MODIFIER_KEYS:
+                self._swallow_release = name
+                self._finish_capture(name)
+            return True
+        if self._swallow_release is not None and name == self._swallow_release:
+            if not down:
+                self._swallow_release = None
+            return True
         mode = self._keyer.mode
-        if key == Qt.Key.Key_Space and mode == "straight":
+        action = keybind.action_for(self._bindings, name) if name else None
+        if action == "key" and mode == "straight":
             which: str | None = None
             button = self.key_button
-        elif key == Qt.Key.Key_Left and mode == "paddle":
+        elif action == "dit" and mode == "paddle":
             which, button = "dit", self.dit_button
-        elif key == Qt.Key.Key_Right and mode == "paddle":
+        elif action == "dah" and mode == "paddle":
             which, button = "dah", self.dah_button
         else:
             return False
@@ -2508,7 +2688,8 @@ def ensure_app(argv: Sequence[str] | None = None) -> QtWidgets.QApplication:
     return app
 
 
-def make_window(args: Any = None, source: BlockSource | None = None) -> MainWindow:
+def make_window(args: Any = None, source: BlockSource | None = None,
+                settings: QtCore.QSettings | None = None) -> MainWindow:
     """Build the main window from parsed command-line ``args``.
 
     ``args`` is the namespace from ``morse.app.build_parser`` (``wav``,
@@ -2517,8 +2698,10 @@ def make_window(args: Any = None, source: BlockSource | None = None) -> MainWind
     own sample rate; otherwise ``source`` is used, or an
     :class:`morse.audio_input.AudioInput` on ``device`` is created (a failure
     to open it is shown in the status bar, not raised).  ``wpm`` selects
-    Manual speed at that value.  The window is returned unshown and not yet
-    started; call ``show()`` and :meth:`MainWindow.start`.
+    Manual speed at that value.  ``settings`` is the preference store for
+    key bindings and the sidetone (the platform store when None).  The window
+    is returned unshown and not yet started; call ``show()`` and
+    :meth:`MainWindow.start`.
     """
     ensure_app()
     wav = getattr(args, "wav", None)
@@ -2545,7 +2728,7 @@ def make_window(args: Any = None, source: BlockSource | None = None) -> MainWind
     except ValueError as exc:
         error = f"{exc}; using {DEFAULT_FREQ_HZ:g} Hz"
         pipeline = Pipeline(fs=fs, block_size=block, f0=DEFAULT_FREQ_HZ, wpm=wpm, adaptive=wpm is None)
-    window = MainWindow(pipeline, source, manual_wpm=wpm)
+    window = MainWindow(pipeline, source, manual_wpm=wpm, settings=settings)
     if error:
         window.set_status_error(error)
     return window

@@ -58,12 +58,29 @@ def drive_replay(window: ui.MainWindow) -> int:
 
 
 @pytest.fixture
-def window(qapp):
+def settings(tmp_path: Path):
+    """An INI-file preference store, so tests never touch the registry."""
+    from PySide6 import QtCore
+
+    return QtCore.QSettings(str(tmp_path / "prefs.ini"), QtCore.QSettings.Format.IniFormat)
+
+
+@pytest.fixture
+def window(qapp, settings):
     """A started window on the loopback fixture with the timer left to the test."""
-    win = ui.make_window(replay_args())
+    win = ui.make_window(replay_args(), settings=settings)
     win.start(run_timer=False)
     yield win
     win.close()
+
+
+def press(window: ui.MainWindow, key, down: bool = True, auto_repeat: bool = False) -> None:
+    """Deliver a key press or release to the window as the keyboard would."""
+    from PySide6 import QtCore, QtGui
+
+    kind = QtCore.QEvent.Type.KeyPress if down else QtCore.QEvent.Type.KeyRelease
+    ev = QtGui.QKeyEvent(kind, key, QtCore.Qt.KeyboardModifier.NoModifier, "", auto_repeat)
+    window.keyPressEvent(ev) if down else window.keyReleaseEvent(ev)
 
 
 # -- decoding through the window's own pipeline --------------------------------
@@ -401,3 +418,88 @@ def test_encoder_farnsworth_spin_stretches_letter_and_word_gaps(qapp, window: ui
     window.enc_farns_spin.setValue(25)  # not below the character speed: standard again
     assert window._encoding.farnsworth_wpm is None
     assert window._encoding.total_ms == standard.total_ms
+
+
+def test_key_bindings_capture_swap_persist_and_reset(qapp, window: ui.MainWindow, settings, fake_sd) -> None:
+    from PySide6.QtCore import Qt
+
+    assert window._bindings == ui.keybind.DEFAULTS
+    assert not window.key_reset_button.isEnabled()
+    assert window.key_button.text().endswith("Space")
+    # Change key on the straight key, then press J: J works the key from now on.
+    window.key_rebind.click()
+    assert "Press the key" in window.key_help.text()
+    press(window, Qt.Key.Key_Shift)  # modifiers are ignored while choosing
+    assert window._capture_action == "key"
+    press(window, Qt.Key.Key_J)
+    assert window._capture_action is None
+    assert window._bindings == {"key": "J", "dit": "Left", "dah": "Right"}
+    assert window.key_button.text() == "Key\nJ"
+    assert "<b>J</b>" in window.key_help.text()
+    assert window.key_reset_button.isEnabled()
+    press(window, Qt.Key.Key_J, down=False)  # the captured key's release keys nothing
+    assert window._livekey is None
+    press(window, Qt.Key.Key_Space)  # Space no longer does anything
+    assert window._livekey is None
+    press(window, Qt.Key.Key_J)
+    assert window._livekey is not None and window._livekey.is_on()
+    press(window, Qt.Key.Key_J, down=False)
+    assert not window._livekey.is_on()
+    # Esc keeps the current binding.
+    window.key_rebind.click()
+    press(window, Qt.Key.Key_Escape)
+    assert window._bindings["key"] == "J"
+    # Taking a paddle's key swaps the two.
+    window._on_key_mode("paddle")
+    window.dah_rebind.click()
+    press(window, Qt.Key.Key_Left)
+    assert window._bindings == {"key": "J", "dit": "Right", "dah": "Left"}
+    assert window.dit_button.text() == "Dit\n\u2192 right arrow"
+    # Persisted: a second window on the same store starts with these bindings.
+    settings.sync()
+    other = ui.make_window(replay_args(), settings=settings)
+    try:
+        assert other._bindings == {"key": "J", "dit": "Right", "dah": "Left"}
+    finally:
+        other.close()
+    window.key_reset_button.click()
+    assert window._bindings == ui.keybind.DEFAULTS
+    assert not window.key_reset_button.isEnabled()
+    assert ui.load_bindings(settings) == ui.keybind.DEFAULTS
+
+
+def test_sidetone_spin_pitches_the_speakers_not_the_feed(qapp, window: ui.MainWindow, settings, fake_sd) -> None:
+    assert window.sidetone_spin.value() == ui.DEFAULT_SIDETONE_HZ
+    assert "600" in window.key_readouts["Sidetone"].value.text()
+    window._on_key_button(True, None)
+    lk = window._livekey
+    assert lk is not None and lk.sidetone_hz == 600.0 and lk.f0 == window.pipeline.f0
+    window.sidetone_spin.setValue(800)
+    assert lk.sidetone_hz == 800.0
+    assert int(settings.value(ui.SETTINGS_SIDETONE)) == 800
+    window.sidetone_spin.setValue(0)  # "tone": follow the beeper frequency
+    assert lk.sidetone_hz is None and lk.speaker_hz == window.pipeline.f0
+    assert "tone" in window.key_readouts["Sidetone"].value.text()
+    window._on_key_button(False, None)
+    other = ui.make_window(replay_args(), settings=settings)
+    try:
+        assert other.sidetone_spin.value() == 0
+    finally:
+        other.close()
+    window.stop()
+
+
+def test_preference_loaders_survive_garbage(tmp_path: Path) -> None:
+    from PySide6 import QtCore
+
+    s = QtCore.QSettings(str(tmp_path / "bad.ini"), QtCore.QSettings.Format.IniFormat)
+    s.setValue(ui.SETTINGS_BINDINGS, "{not json")
+    s.setValue(ui.SETTINGS_SIDETONE, "loud")
+    assert ui.load_bindings(s) == ui.keybind.DEFAULTS
+    assert ui.load_sidetone(s) == ui.DEFAULT_SIDETONE_HZ
+    s.setValue(ui.SETTINGS_SIDETONE, 99999)
+    assert ui.load_sidetone(s) == ui.DEFAULT_SIDETONE_HZ
+    assert ui.key_name(QtCore.Qt.Key.Key_Space) == "Space"
+    assert ui.key_name(QtCore.Qt.Key.Key_Left) == "Left"
+    assert ui.key_name(QtCore.Qt.Key.Key_unknown) == ""
+    assert ui.key_label("Left") == "\u2190 left arrow" and ui.key_label("J") == "J"

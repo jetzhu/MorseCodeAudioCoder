@@ -484,6 +484,20 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Key bindings and sidetone (2026-09-22, v0.1.7): `morse/bindings.py` and
+  `web/js/bindings.js` share the binding rules (three actions `key`, `dit`,
+  `dah`; `sanitize`, `rebind` swaps a taken key, `action_for`, `is_default`).
+  Each key button has a Change key link: the next press becomes the binding
+  (Esc cancels, modifiers ignored, the captured key's release is swallowed);
+  Reset keys restores Space and the arrows. Desktop stores Qt portable key
+  names in `QSettings("MorseConsole", "Beeper Morse Console")` under
+  `key/bindings` (JSON) and `key/sidetone_hz`; the web app stores
+  `KeyboardEvent.code` values in localStorage `morse.key.bindings` and
+  `morse.key.sidetone`. The sidetone (default 600 Hz; 0 / empty follows the
+  beeper frequency) is what the speakers play while keying; the decoder feed
+  is always rendered at `f0`: `LiveKey.set_sidetone` / `speaker_hz` in
+  Python, `setSidetone` / `speakerHz` in JS, where a second oscillator chain
+  drives the extra outputs.
 - Farnsworth (2026-09-22): an optional overall speed next to the encoder speed,
   empty for off; when below the character speed the keying guide, Play, the
   duration and gap readouts use `farnsworthGaps` / `farnsworth_gaps`. The

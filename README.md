@@ -30,6 +30,13 @@ while held, like an electronic keyer; holding both alternates and a tap during
 an element is remembered. The Sent line reads back what you keyed; with Feed
 the decoder on and the decoder listening, the decoder reads it too.
 
+**Change key** under a button picks any other keyboard key (press it, then
+the key; Esc keeps the old one; Reset keys restores the defaults). The choice
+is remembered between runs. **Sidetone** is the pitch you hear while keying,
+600 Hz by default; set it to "tone" (desktop) or leave it empty (web) to hear
+the beeper frequency itself. The decoder is always fed the beeper frequency,
+so the sidetone never affects decoding.
+
 ## Farnsworth spacing
 
 Next to the encoder speed, a Farnsworth field takes an overall speed. When it

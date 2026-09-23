@@ -284,3 +284,40 @@ def test_livekey_paddle_elements_are_driven_by_the_stream_clock(monkeypatch):
     assert 8 <= sum(on_blocks[19:32]) <= 12
     lk.paddle_up("dit")
     lk.stop()
+
+
+def _dominant_hz(block: np.ndarray, fs: int) -> float:
+    spec = np.abs(np.fft.rfft(block * np.hanning(len(block))))
+    return float(np.argmax(spec) * fs / len(block))
+
+
+def test_livekey_sidetone_goes_to_the_speakers_and_f0_to_the_feed(monkeypatch):
+    fake = install_fake_sd(monkeypatch)
+    lk = LiveKey(Keyer(T), f0=2491.0, fs=48000, amplitude=0.3, sidetone_hz=600.0)
+    assert lk.speaker_hz == 600.0
+    lk.start()
+    stream = fake.streams[0]  # type: ignore[attr-defined]
+    lk.key_down()
+    out = np.zeros((4800, 1), dtype=np.float32)
+    for _ in range(3):
+        stream.callback(out, 4800, None, None)
+    assert abs(_dominant_hz(out[:, 0], 48000) - 600.0) < 15
+    feed = lk.feed_block(lk.now_ms() + 200.0, 4800)
+    assert abs(_dominant_hz(feed, 48000) - 2491.0) < 15
+    # Follow the tone again: the speakers move to f0; retuning f0 moves both.
+    lk.set_sidetone(None)
+    assert lk.sidetone_hz is None and lk.speaker_hz == 2491.0
+    lk.set_frequency(1000.0)
+    for _ in range(3):
+        stream.callback(out, 4800, None, None)
+    assert abs(_dominant_hz(out[:, 0], 48000) - 1000.0) < 15
+    lk.set_sidetone(0)
+    assert lk.sidetone_hz is None
+    lk.set_sidetone(700)
+    assert lk.speaker_hz == 700.0
+    with pytest.raises(ValueError):
+        lk.set_sidetone(30000)
+    with pytest.raises(ValueError):
+        LiveKey(Keyer(T), f0=1000.0, sidetone_hz=-1.0)
+    assert "sidetone=700" in repr(lk)
+    lk.stop()

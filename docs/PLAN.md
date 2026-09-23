@@ -232,7 +232,7 @@ Candidate enhancements noted at the same time, not built:
 - Farnsworth timing for the encoder (characters at one speed, gaps at a
   slower one), the standard way to learn by ear. Built 2026-09-22 (v0.1.6).
 - Configurable key bindings and a sidetone pitch separate from the beeper
-  frequency.
+  frequency. Built 2026-09-22 (v0.1.7).
 - Export of the decoded log with timestamps.
 - Keyer weighting and mode variants (iambic A and B, bug mode).
 

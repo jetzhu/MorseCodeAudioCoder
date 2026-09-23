@@ -295,6 +295,11 @@ class LiveKey:
     renders the envelope, so paddle elements are sample-accurate.  Presses
     from the UI thread are stamped with the same clock (:meth:`now_ms`);
     every keyer call goes through one lock.
+
+    Two pitches: the speakers play the *sidetone* (``sidetone_hz``, a
+    comfortable pitch for the operator; None follows ``f0``) while
+    :meth:`feed_block`, the decoder's software loopback, always renders at
+    ``f0``, the frequency the detector is tuned to.
     """
 
     def __init__(
@@ -306,13 +311,17 @@ class LiveKey:
         amplitude: float = 0.3,
         ramp_ms: float = 3.0,
         block_size: int = 480,
+        sidetone_hz: float | None = None,
     ) -> None:
         if not 0 < f0 < fs / 2:
             raise ValueError(f"f0 must be between 0 and fs/2, got {f0!r}")
+        if sidetone_hz is not None and not 0 < sidetone_hz < fs / 2:
+            raise ValueError(f"sidetone_hz must be between 0 and fs/2, got {sidetone_hz!r}")
         if not 0.0 <= amplitude <= 1.0:
             raise ValueError(f"amplitude must be in 0..1, got {amplitude!r}")
         self.keyer = keyer
         self.f0 = float(f0)
+        self.sidetone_hz: float | None = None if sidetone_hz is None else float(sidetone_hz)
         self.fs = int(fs)
         self.device = device
         self.amplitude = float(amplitude)
@@ -392,9 +401,24 @@ class LiveKey:
             self.keyer.set_speed(dit_ms)
 
     def set_frequency(self, f0: float) -> None:
+        """Retune the decoder feed (and the speakers when no sidetone is set)."""
         if not 0 < f0 < self.fs / 2:
             raise ValueError(f"f0 must be between 0 and fs/2, got {f0!r}")
         self.f0 = float(f0)
+
+    def set_sidetone(self, hz: float | None) -> None:
+        """Pitch the speakers play; None (or 0) follows :attr:`f0`. Takes effect at the next block."""
+        if hz is None or float(hz) == 0.0:
+            self.sidetone_hz = None
+            return
+        if not 0 < hz < self.fs / 2:
+            raise ValueError(f"sidetone_hz must be between 0 and fs/2, got {hz!r}")
+        self.sidetone_hz = float(hz)
+
+    @property
+    def speaker_hz(self) -> float:
+        """The pitch the speakers play now: the sidetone, or ``f0`` without one."""
+        return self.f0 if self.sidetone_hz is None else self.sidetone_hz
 
     def is_on(self) -> bool:
         """Whether the tone is sounding now."""
@@ -417,8 +441,8 @@ class LiveKey:
         trans = [tr for tr in trans if tr[0] > window_start]
         return envelope(trans, initial, t0_ms, n, self.fs, self.ramp_ms)
 
-    def _sine(self, n: int, phase: float) -> tuple[np.ndarray, float]:
-        step = 2.0 * math.pi * self.f0 / self.fs
+    def _sine(self, n: int, phase: float, hz: float) -> tuple[np.ndarray, float]:
+        step = 2.0 * math.pi * hz / self.fs
         k = np.arange(n, dtype=np.float64)
         samples = np.sin(phase + step * k).astype(np.float32)
         return samples, (phase + step * n) % (2.0 * math.pi)
@@ -430,15 +454,17 @@ class LiveKey:
             self.keyer.tick(t0 + block_ms)
             env = self._render_env(t0, frames)
             self._stream_ms = t0 + block_ms
-        tone, self._phase_out = self._sine(frames, self._phase_out)
+        tone, self._phase_out = self._sine(frames, self._phase_out, self.speaker_hz)
         outdata[:, 0] = self.amplitude * env * tone
 
     def feed_block(self, t0_ms: float, n: int) -> np.ndarray:
         """The key's tone for ``n`` samples starting at keyer time ``t0_ms`` (for the decoder feed)."""
         with self._lock:
             env = self._render_env(t0_ms, n)
-        tone, self._phase_feed = self._sine(n, self._phase_feed)
+        tone, self._phase_feed = self._sine(n, self._phase_feed, self.f0)
         return (self.amplitude * env * tone).astype(np.float32)
 
     def __repr__(self) -> str:
-        return f"LiveKey(f0={self.f0:.0f}, fs={self.fs}, running={self.running}, keyer={self.keyer!r})"
+        side = "follows f0" if self.sidetone_hz is None else f"{self.sidetone_hz:.0f}"
+        return (f"LiveKey(f0={self.f0:.0f}, sidetone={side}, fs={self.fs}, running={self.running}, "
+                f"keyer={self.keyer!r})")

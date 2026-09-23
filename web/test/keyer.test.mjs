@@ -235,13 +235,16 @@ test("LiveKey schedules gain edges on the AudioContext clock and feeds extra out
   assert.equal(lk.isOn(), false);
   lk.start(ac, 2491);
   assert.equal(lk.running, true);
-  const [osc] = ac.oscs;
-  const [g] = ac.gains;
+  const [osc, oscFeed] = ac.oscs;
+  const [g, gFeed] = ac.gains;
   assert.equal(osc.type, "sine");
-  assert.equal(osc.frequency.value, 2491);
-  assert.ok(osc.started);
+  assert.equal(osc.frequency.value, 2491, "no sidetone: the speakers follow f0");
+  assert.equal(oscFeed.frequency.value, 2491);
+  assert.ok(osc.started && oscFeed.started);
   assert.ok(g.connectedTo.includes(ac.destination));
-  assert.ok(g.connectedTo.includes(bus));
+  assert.ok(!g.connectedTo.includes(bus), "the speaker chain does not reach the decoder bus");
+  assert.ok(gFeed.connectedTo.includes(bus));
+  assert.ok(!gFeed.connectedTo.includes(ac.destination));
   lk.keyDown();
   assert.equal(lk.isOn(), false, "the edge is 5 ms ahead of now");
   ac.currentTime += 0.010;
@@ -251,11 +254,41 @@ test("LiveKey schedules gain edges on the AudioContext clock and feeds extra out
   assert.ok(g.gain.events[0].at >= 2.0);
   lk.keyUp();
   assert.equal(g.gain.events[1].target, 0);
+  assert.equal(gFeed.gain.events.length, 2, "the feed chain gets every edge too");
   lk.setFrequency(1000);
   assert.equal(osc.frequency.events.at(-1).value, 1000);
+  assert.equal(oscFeed.frequency.events.at(-1).value, 1000);
   lk.stop();
   assert.ok(osc.stopped && osc.disconnected && g.disconnected);
+  assert.ok(oscFeed.stopped && oscFeed.disconnected && gFeed.disconnected);
   assert.equal(lk.running, false);
+});
+
+test("LiveKey sidetone pitches the speakers while the feed stays on f0", () => {
+  const ac = new FakeAC();
+  const lk = new LiveKey(new Keyer(T));
+  lk.setSidetone(600);
+  assert.equal(lk.speakerHz, 600);
+  lk.start(ac, 2491);
+  const [osc, oscFeed] = ac.oscs;
+  assert.equal(osc.frequency.value, 600);
+  assert.equal(oscFeed.frequency.value, 2491);
+  lk.setFrequency(1000);
+  assert.equal(oscFeed.frequency.events.at(-1).value, 1000);
+  assert.equal(osc.frequency.events.length, 0, "a sidetone does not follow f0");
+  lk.setSidetone(null);
+  assert.equal(lk.speakerHz, 1000);
+  assert.equal(osc.frequency.events.at(-1).value, 1000);
+  lk.setSidetone(0);
+  assert.equal(lk.sidetoneHz, null);
+  lk.setSidetone(NaN);
+  assert.equal(lk.sidetoneHz, null);
+  lk.setSidetone(750);
+  assert.equal(osc.frequency.events.at(-1).value, 750);
+  const bus = { connectedTo: [], connect() {}, disconnect() {} };
+  lk.addOutput(bus);
+  assert.ok(ac.gains[1].connectedTo.includes(bus));
+  lk.stop();
 });
 
 test("LiveKey paddle: the element end is scheduled at once and the timer arms for the gap", async () => {

@@ -248,10 +248,16 @@ export class LiveKey {
     /** @type {AudioContext | null} */
     this.audioContext = null;
     this.f0 = 2491;
-    /** @type {OscillatorNode | null} */
+    /** Pitch the speakers play; null follows `f0`. The decoder feed is always at `f0`. @type {number | null} */
+    this.sidetoneHz = null;
+    /** Speaker chain (sidetone). @type {OscillatorNode | null} */
     this._osc = null;
     /** @type {GainNode | null} */
     this._gain = null;
+    /** Feed chain (f0), for the extra outputs. @type {OscillatorNode | null} */
+    this._oscFeed = null;
+    /** @type {GainNode | null} */
+    this._gainFeed = null;
     /** @type {Set<AudioNode>} */
     this._outputs = new Set();
     /** @type {ReturnType<typeof setTimeout> | null} */
@@ -270,50 +276,61 @@ export class LiveKey {
     return this.audioContext ? this.audioContext.currentTime * 1000 : 0;
   }
 
+  /** The pitch the speakers play now: the sidetone, or `f0` without one. */
+  get speakerHz() {
+    return this.sidetoneHz === null ? this.f0 : this.sidetoneHz;
+  }
+
   /**
-   * Create the silent oscillator; the tone sounds only while keyed.
+   * Create the silent oscillators; the tone sounds only while keyed. The
+   * first chain plays the sidetone through the speakers, the second renders
+   * `f0` for the extra outputs (the decoder feed).
    * @param {AudioContext} audioContext @param {number} f0
    */
   start(audioContext, f0) {
     if (this._osc) return;
     this.audioContext = audioContext;
     this.f0 = f0;
-    const osc = audioContext.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = f0;
-    const g = audioContext.createGain();
-    g.gain.value = 0;
-    osc.connect(g);
+    const make = (hz) => {
+      const osc = audioContext.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = hz;
+      const g = audioContext.createGain();
+      g.gain.value = 0;
+      osc.connect(g);
+      osc.start();
+      return [osc, g];
+    };
+    const [osc, g] = make(this.speakerHz);
     g.connect(audioContext.destination);
-    for (const node of this._outputs) safeConnect(g, node);
-    osc.start();
+    const [oscFeed, gFeed] = make(f0);
+    for (const node of this._outputs) safeConnect(gFeed, node);
     this._osc = osc;
     this._gain = g;
+    this._oscFeed = oscFeed;
+    this._gainFeed = gFeed;
   }
 
   /** Silence and tear down; the keyer forgets everything held. */
   stop() {
     this._cancelTimer();
     if (this.audioContext) this.keyer.releaseAll(this.nowMs);
-    const osc = this._osc;
-    const g = this._gain;
+    const nodes = [this._osc, this._gain, this._oscFeed, this._gainFeed];
     this._osc = null;
     this._gain = null;
-    if (osc) {
-      try {
-        osc.stop();
-      } catch {
-        /* already stopped */
+    this._oscFeed = null;
+    this._gainFeed = null;
+    for (const node of nodes) {
+      if (!node) continue;
+      if (typeof node.stop === "function") {
+        try {
+          node.stop();
+        } catch {
+          /* already stopped */
+        }
       }
       try {
-        osc.disconnect();
-      } catch {
-        /* never connected */
-      }
-    }
-    if (g) {
-      try {
-        g.disconnect();
+        node.disconnect();
       } catch {
         /* never connected */
       }
@@ -354,10 +371,22 @@ export class LiveKey {
     this.keyer.setSpeed(ditMs);
   }
 
-  /** @param {number} f0 */
+  /** Retune the decoder feed (and the speakers when no sidetone is set). @param {number} f0 */
   setFrequency(f0) {
     this.f0 = f0;
-    if (this._osc && this.audioContext) this._osc.frequency.setValueAtTime(f0, this.audioContext.currentTime);
+    if (!this.audioContext) return;
+    const now = this.audioContext.currentTime;
+    if (this._oscFeed) this._oscFeed.frequency.setValueAtTime(f0, now);
+    if (this._osc && this.sidetoneHz === null) this._osc.frequency.setValueAtTime(f0, now);
+  }
+
+  /**
+   * Pitch the speakers play; null, 0 or a non-finite value follows `f0`.
+   * @param {number | null} hz
+   */
+  setSidetone(hz) {
+    this.sidetoneHz = Number.isFinite(hz) && hz > 0 ? Number(hz) : null;
+    if (this._osc && this.audioContext) this._osc.frequency.setValueAtTime(this.speakerHz, this.audioContext.currentTime);
   }
 
   /** Whether the tone is sounding now. */
@@ -367,19 +396,19 @@ export class LiveKey {
 
   // ----------------------------------------------------------------- outputs
 
-  /** Also send the tone to `node` (the decoder's input bus). @param {AudioNode} node */
+  /** Also send the tone, at `f0`, to `node` (the decoder's input bus). @param {AudioNode} node */
   addOutput(node) {
     if (!node || this._outputs.has(node)) return;
     this._outputs.add(node);
-    if (this._gain) safeConnect(this._gain, node);
+    if (this._gainFeed) safeConnect(this._gainFeed, node);
   }
 
   /** @param {AudioNode} node */
   removeOutput(node) {
     if (!this._outputs.delete(node)) return;
-    if (this._gain) {
+    if (this._gainFeed) {
       try {
-        this._gain.disconnect(node);
+        this._gainFeed.disconnect(node);
       } catch {
         /* not connected */
       }
@@ -400,6 +429,7 @@ export class LiveKey {
       for (const [tMs, on] of transitions) {
         const at = Math.max(tMs / 1000, ac.currentTime);
         this._gain.gain.setTargetAtTime(on ? this.gain : 0, at, EDGE_TAU_S);
+        if (this._gainFeed) this._gainFeed.gain.setTargetAtTime(on ? this.gain : 0, at, EDGE_TAU_S);
       }
     }
     this._arm();
