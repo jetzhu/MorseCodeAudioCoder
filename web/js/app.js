@@ -1825,8 +1825,10 @@ function frameLoop() {
   const frame = (now) => {
     if (now - last >= frameMs - 1) {
       if ((state.running && !state.paused) || player.playing || dirty) {
-        drawAll();
+        // Cleared before drawing: a draw that asks for another frame (the Sent
+        // line with a letter still pending) must not have its request wiped.
         dirty = false;
+        drawAll();
         last = now;
       }
     }

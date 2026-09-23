@@ -514,8 +514,11 @@ Behavioural requirements
   sounds or a letter is pending, so `trackSent` keeps calling `idle()` and the
   last letter closes after seven dit lengths with no further input even when
   the main decoder is not listening (before, the frame loop slept and the
-  dots and dashes stayed until the next key press). The desktop refreshes the
-  Key strip on its timer and never had the gap.
+  dots and dashes stayed until the next key press). The frame loop clears
+  `dirty` before drawing, not after, so a draw that asks for another frame is
+  not wiped (2026-09-23: with the decoder stopped the flag set during the draw
+  was being reset at once and the flush never came). The desktop refreshes
+  the Key strip on its timer and never had the gap.
 - Search engines (2026-09-22): the page has a descriptive title and
   description, `rel=canonical` to the Pages URL, Open Graph and Twitter cards
   with `web/og.png` (1200x630, rendered by a Qt script), JSON-LD
