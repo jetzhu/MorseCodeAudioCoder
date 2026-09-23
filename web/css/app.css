@@ -325,3 +325,10 @@ button.ctl.key.big.down small { color: rgba(255, 255, 255, 0.85); }
 .sentrow { align-items: center; }
 .k-label { font-size: 12px; color: var(--ink-2); letter-spacing: 0.04em; text-transform: uppercase; }
 .enc-out.sent { flex: 1 1 200px; min-height: 30px; font-size: 16px; }
+
+/* ---------- practice strip ---------- */
+.pr-target { font-size: 30px; font-weight: 600; letter-spacing: 0.18em; color: var(--ink); padding: 4px 0; min-height: 44px; }
+.pr-target.done { color: var(--good); }
+.pr-result { font-size: 13px; color: var(--ink-2); min-height: 18px; }
+.pr-result.good { color: var(--good); font-weight: 600; }
+.pr-result.bad { color: var(--on); }

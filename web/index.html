@@ -203,6 +203,37 @@
       </div>
     </section>
 
+    <section class="encode practice" aria-label="Practice keying">
+      <header>Practice <span>· key the target with the Key above; the copy is graded when it matches or when you press Check</span><span class="tag">F</span></header>
+      <div class="enc-body">
+        <div class="enc-left">
+          <div class="enc-row">
+            <div class="field"><label>Drill</label>
+              <div class="seg" role="group" aria-label="Drill kind">
+                <button id="prWords" aria-pressed="true">Words</button>
+                <button id="prCalls" aria-pressed="false">Call signs</button>
+                <button id="prDigits" aria-pressed="false">Digits</button>
+                <button id="prMixed" aria-pressed="false">Mixed</button>
+              </div>
+            </div>
+            <button class="ctl primary" id="prNext" title="Draw the next target and clear the Sent line">Next target</button>
+            <button class="ctl" id="prCheck" title="Grade the Sent line against the target">Check</button>
+            <label class="field check"><input type="checkbox" id="prShowCode"> <span>Show the code</span></label>
+          </div>
+          <div class="pr-target mono" id="prTarget">Press Next target</div>
+          <div class="enc-out mono sent" id="prCode" hidden>&nbsp;</div>
+          <div class="pr-result" id="prResult">Your copy appears in the Sent line above.</div>
+        </div>
+        <div class="enc-right readouts">
+          <div class="ro"><span class="k">Accuracy</span><span class="v mono" id="prAcc">—<small>%</small></span></div>
+          <div class="ro"><span class="k">Your speed</span><span class="v mono" id="prWpm">—<small>WPM</small></span></div>
+          <div class="ro"><span class="k">Timing error</span><span class="v mono" id="prRhythm">—<small>%</small></span></div>
+          <div class="ro"><span class="k">Session</span><span class="v mono" id="prSession">0<small>/ 0</small></span></div>
+          <div class="tip">Accuracy is one minus the edit distance to the target over its length. Timing error compares each mark and gap with the ideal 1 : 3 : 7 proportions at your own speed.</div>
+        </div>
+      </div>
+    </section>
+
     <div class="statusbar mono">
       <span><span class="dot" id="stateDot">○</span> <span id="stateV">Ready — press Start</span></span>
       <span id="blockV">10 ms blocks</span>
@@ -233,6 +264,7 @@
     <div class="note"><span class="tag">C</span><div><h3>Decoded text and timing</h3><p>The letter being keyed builds up as dots and dashes and is committed at the next letter gap. On the right, the live estimates that drive the decoder: dit, dah, letter gap and the reverb offset, plus a histogram of recent mark lengths that should show two clusters.</p></div></div>
     <div class="note"><span class="tag">D</span><div><h3>Encode</h3><p>Type English, read the Morse. Letters are separated by a space and words by a slash. The bar underneath is the keying guide: marks and gaps drawn to scale at the chosen speed, with each letter labelled, so you can follow it while pressing the button. Play keys the tone through the speakers and runs a playhead along the guide.</p></div></div>
     <div class="note"><span class="tag">E</span><div><h3>Key</h3><p>Send Morse yourself. Single key: hold Space or the big button and the tone sounds while held, exactly like a straight key. Two keys: the left arrow sends dits and the right arrow dahs, timed at the encoder speed and repeating while held, like an electronic keyer. The Sent line reads back what you keyed even when the decoder is not listening.</p></div></div>
+    <div class="note"><span class="tag">F</span><div><h3>Practice</h3><p>Pick a drill, press Next target, key the word with the Key strip. When the Sent line matches, the target is marked correct; otherwise press Check to see the edit distance, your speed and how far your marks and gaps sit from the ideal proportions. Show the code reveals the dots and dashes while you learn.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>

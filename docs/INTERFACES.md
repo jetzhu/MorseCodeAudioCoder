@@ -577,6 +577,20 @@ callback advances the keyer with the stream clock (sample-accurate elements)
 and renders the envelope with 3 ms ramps; presses from the UI thread are
 stamped with `now_ms()`; one lock guards every keyer call.
 
+## morse/practice.py (2026-09-22)
+
+Pure logic shared with `web/js/practice.js`: `WORDS` (about 150 common words),
+`call_sign(rng)`, `digit_group(rng, length=5)`, `class Practice(kind, seed)`
+with `next_target()`, `record(score)`, `reset_session()`, `asked`, `correct`;
+`score(target, sent) -> Score(correct, errors, total, accuracy, perfect)`
+by edit distance with a match count from the alignment; `rhythm(runs,
+dit_ms) -> Rhythm(mark_error_pct, gap_error_pct, marks, gaps, error_pct)`
+comparing each run with the nearest ideal element (marks 1 or 3 dits, gaps
+1, 3 or 7). Both UIs show a Practice strip (section F): drill kind, Next
+target, Check, Show the code, the target in large type, and readouts for
+accuracy, the operator's speed, timing error and the session tally. The copy
+is the Sent line; a perfect copy is graded automatically.
+
 ## morse/ui.py (milestone M7)
 
 `run_ui(args) -> int`. pyqtgraph + PySide6, layout per the approved mock

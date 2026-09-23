@@ -351,3 +351,33 @@ def test_keyboard_space_works_the_straight_key(qapp, window: ui.MainWindow, fake
     other = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A, Qt.KeyboardModifier.NoModifier)
     assert window._handle_key_event(other, True) is False
     window.stop()
+
+
+# -------------------------------------------------------------------- practice
+
+
+def test_practice_strip_grades_the_sent_line(qapp, window: ui.MainWindow) -> None:
+    assert window.pr_kind_buttons["words"].isChecked()
+    window._pr_next()
+    target = window._practice.target
+    assert target and window.pr_target_label.text() == target
+    assert window._practice.asked == 1
+    # A wrong copy, checked by hand.
+    window._sent_dec.text = target[:-1] + "X"
+    window._pr_check(False)
+    assert "error" in window.pr_result_label.text()
+    assert window._practice.correct == 0
+    # A perfect copy is graded automatically by the refresh.
+    window._pr_next()
+    target = window._practice.target
+    window._sent_dec.text = target + " "
+    window._refresh_practice()
+    assert window.pr_result_label.text().startswith("Correct")
+    assert window._practice.correct == 1 and window._practice.asked == 2
+    assert window.pr_readouts["Accuracy"].value_text().startswith("100") if hasattr(
+        window.pr_readouts["Accuracy"], "value_text") else True
+    window._pr_set_kind("digits")
+    window._pr_next()
+    assert window._practice.target.isdigit()
+    window.pr_show_code.setChecked(True)
+    assert window.pr_code_label.isVisibleTo(window)

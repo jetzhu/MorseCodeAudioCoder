@@ -52,6 +52,7 @@ from morse import table
 from morse.decoder import MorseDecoder
 from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
+from morse import practice
 from morse.keyer import Keyer, LiveKey
 from morse.runs import Run
 from morse.player import TonePlayer, build_timing, render_tone
@@ -865,7 +866,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sent_dec = MorseDecoder()
         self._sent_index: int = 0
         self._sent_last: tuple[float, bool] | None = None
+        self._sent_runs: list[Run] = []
         self._feed_time_ms: float | None = None
+        # Practice (section F): targets to key, graded against the Sent line.
+        self._practice = practice.Practice("words")
+        self._pr_checked: bool = False
         self._encoding: Encoding = build_encoding("", 8)
 
         self.setWindowTitle("Beeper Morse Console")
@@ -954,6 +959,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(self._build_body(), 1)
         root.addWidget(self._build_encode())
         root.addWidget(self._build_key())
+        root.addWidget(self._build_practice())
         root.addWidget(self._build_statusbar())
         self.setCentralWidget(central)
 
@@ -1485,6 +1491,164 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         return btn
 
+    def _build_practice(self) -> QtWidgets.QWidget:
+        """Section F: key a target and get graded."""
+        t = self.theme
+        frame = QtWidgets.QFrame()
+        frame.setObjectName("encode")
+        lay = QtWidgets.QVBoxLayout(frame)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header("Practice", "\u00b7 key the target with the Key above; the copy is graded "
+                                               "when it matches or when you press Check", "F"))
+        body = QtWidgets.QWidget()
+        body_lay = QtWidgets.QHBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+
+        left = QtWidgets.QWidget()
+        left_lay = QtWidgets.QVBoxLayout(left)
+        left_lay.setContentsMargins(14, 8, 14, 12)
+        left_lay.setSpacing(8)
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(self._field_label("Drill"))
+        seg = QtWidgets.QWidget()
+        seg_lay = QtWidgets.QHBoxLayout(seg)
+        seg_lay.setContentsMargins(0, 0, 0, 0)
+        seg_lay.setSpacing(0)
+        self.pr_kind_buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.pr_kind_group = QtWidgets.QButtonGroup(self)
+        self.pr_kind_group.setExclusive(True)
+        for i, (kind, label) in enumerate((("words", "Words"), ("calls", "Call signs"),
+                                           ("digits", "Digits"), ("mixed", "Mixed"))):
+            b = QtWidgets.QPushButton(label)
+            b.setObjectName("segL" if i == 0 else "segR" if i == 3 else "segM")
+            b.setCheckable(True)
+            b.setFont(self._font(12))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.clicked.connect(lambda _=False, k=kind: self._pr_set_kind(k))
+            self.pr_kind_group.addButton(b)
+            self.pr_kind_buttons[kind] = b
+            seg_lay.addWidget(b)
+        self.pr_kind_buttons["words"].setChecked(True)
+        row.addWidget(seg)
+        self.pr_next_button = self._button("Next target", primary=True)
+        self.pr_next_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pr_next_button.clicked.connect(self._pr_next)
+        row.addWidget(self.pr_next_button)
+        self.pr_check_button = self._button("Check")
+        self.pr_check_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pr_check_button.clicked.connect(lambda: self._pr_check(False))
+        row.addWidget(self.pr_check_button)
+        self.pr_show_code = QtWidgets.QCheckBox("Show the code")
+        self.pr_show_code.setFont(self._font(12))
+        self.pr_show_code.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pr_show_code.toggled.connect(lambda on: self.pr_code_label.setVisible(on))
+        row.addWidget(self.pr_show_code)
+        row.addStretch(1)
+        left_lay.addLayout(row)
+        self.pr_target_label = QtWidgets.QLabel("Press Next target")
+        self.pr_target_label.setFont(self._font(30, mono=True, weight=QtGui.QFont.Weight.DemiBold, spacing_em=0.18))
+        self.pr_target_label.setStyleSheet(f"color: {t.ink};")
+        self.pr_target_label.setMinimumHeight(44)
+        left_lay.addWidget(self.pr_target_label)
+        self.pr_code_label = QtWidgets.QLabel("\u00a0")
+        self.pr_code_label.setObjectName("encOut")
+        self.pr_code_label.setFont(self._font(16, mono=True, spacing_em=0.06))
+        self.pr_code_label.setVisible(False)
+        left_lay.addWidget(self.pr_code_label)
+        self.pr_result_label = self._label("Your copy appears in the Sent line above.", 13, t.ink2)
+        self.pr_result_label.setWordWrap(True)
+        left_lay.addWidget(self.pr_result_label)
+        body_lay.addWidget(left, 1)
+
+        right = QtWidgets.QFrame()
+        right.setObjectName("encRight")
+        right.setFixedWidth(RAIL_WIDTH)
+        right_lay = QtWidgets.QVBoxLayout(right)
+        right_lay.setContentsMargins(14, 12, 14, 12)
+        right_lay.setSpacing(10)
+        self.pr_readouts: dict[str, Readout] = {}
+        for key in ("Accuracy", "Your speed", "Timing error", "Session"):
+            ro = Readout(self.theme, self.fonts, key)
+            self.pr_readouts[key] = ro
+            right_lay.addWidget(ro)
+        self.pr_readouts["Session"].set_value("0", "/ 0")
+        note = QtWidgets.QLabel("Accuracy is one minus the edit distance to the target over its length. "
+                                "Timing error compares each mark and gap with the ideal 1 : 3 : 7 "
+                                "proportions at your own speed.")
+        note.setFont(self._font(12))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {t.ink3};")
+        right_lay.addWidget(note)
+        right_lay.addStretch(1)
+        body_lay.addWidget(right)
+        lay.addWidget(body)
+        return frame
+
+    def _pr_set_kind(self, kind: str) -> None:
+        self._practice.set_kind(kind)  # type: ignore[arg-type]
+
+    def _pr_next(self) -> None:
+        target = self._practice.next_target()
+        self._clear_sent()
+        self._pr_checked = False
+        self.pr_target_label.setText(target)
+        self.pr_target_label.setStyleSheet(f"color: {self.theme.ink};")
+        self.pr_code_label.setText(table.encode(target).replace(".", "\u00b7").replace("-", "\u2212"))
+        self.pr_result_label.setText("Key it with the Key strip above.")
+        self.pr_result_label.setStyleSheet(f"color: {self.theme.ink2};")
+        for key, unit in (("Accuracy", "%"), ("Your speed", "WPM"), ("Timing error", "%")):
+            self.pr_readouts[key].set_value("\u2014", unit)
+        self._pr_update_session()
+
+    def _pr_keyed_runs(self) -> list[Run]:
+        runs = self._sent_runs
+        a, b = 0, len(runs)
+        while a < b and not runs[a].on:
+            a += 1
+        while b > a and not runs[b - 1].on:
+            b -= 1
+        return runs[a:b]
+
+    def _pr_check(self, auto: bool) -> None:
+        if self._practice.target is None or self._pr_checked:
+            return
+        result = practice.score(self._practice.target, self._sent_dec.text)
+        if auto and not result.perfect:
+            return
+        self._pr_checked = True
+        self._practice.record(result)
+        rep = practice.rhythm(self._pr_keyed_runs(), self._sent_dec.dit_ms)
+        self.pr_readouts["Accuracy"].set_value(f"{round(100 * result.accuracy)}", "%")
+        ready = self._sent_dec.timing_ready or len(self._sent_runs) >= 3
+        self.pr_readouts["Your speed"].set_value(f"{self._sent_dec.wpm:.1f}" if ready else "\u2014", "WPM")
+        self.pr_readouts["Timing error"].set_value(f"{round(rep.error_pct)}" if rep.marks + rep.gaps else "\u2014", "%")
+        t = self.theme
+        if result.perfect:
+            self.pr_result_label.setText("Correct. Press Next target to continue.")
+            self.pr_result_label.setStyleSheet(f"color: {t.good}; font-weight: 600;")
+            self.pr_target_label.setStyleSheet(f"color: {t.good};")
+        else:
+            sent_text = result.sent or "(nothing)"
+            plural = "" if result.errors == 1 else "s"
+            self.pr_result_label.setText(f"You sent {sent_text}: {result.errors} error{plural} against {result.target}.")
+            self.pr_result_label.setStyleSheet(f"color: {t.on};")
+        self._pr_update_session()
+
+    def _pr_update_session(self) -> None:
+        self.pr_readouts["Session"].set_value(str(self._practice.correct), f"/ {self._practice.asked}")
+
+    def _refresh_practice(self) -> None:
+        """Grade automatically once the Sent line matches the target."""
+        if self._practice.target is None or self._pr_checked:
+            return
+        dec = self._sent_dec
+        if dec.text.strip() and not dec.buffer and not dec.pending_count:
+            self._pr_check(True)
+
     def _build_statusbar(self) -> QtWidgets.QWidget:
         t = self.theme
         bar = QtWidgets.QFrame()
@@ -1534,11 +1698,11 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton#primary {{ background: {t.trace}; border-color: {t.trace}; color: #FFFFFF; }}
             QPushButton#primary:hover {{ background: {t.on}; }}
             QFrame#segFrame {{ border: 1px solid {t.line}; border-radius: 4px; background: {t.panel}; }}
-            QPushButton#segL, QPushButton#segR {{ border: 0; border-radius: 0; background: {t.panel};
+            QPushButton#segL, QPushButton#segM, QPushButton#segR {{ border: 0; border-radius: 0; background: {t.panel};
                                                   color: {t.ink2}; padding: 0 10px; }}
             QPushButton#segL {{ border-top-left-radius: 3px; border-bottom-left-radius: 3px; }}
             QPushButton#segR {{ border-top-right-radius: 3px; border-bottom-right-radius: 3px; }}
-            QPushButton#segL:checked, QPushButton#segR:checked {{ background: {t.ink}; color: {t.panel}; }}
+            QPushButton#segL:checked, QPushButton#segM:checked, QPushButton#segR:checked {{ background: {t.ink}; color: {t.panel}; }}
             QComboBox, QSpinBox, QLineEdit {{ min-height: 26px; max-height: 26px; padding: 0 8px;
                 border: 1px solid {t.line}; border-radius: 4px; background: {t.panel}; color: {t.ink};
                 selection-background-color: {t.spec}; selection-color: #FFFFFF; }}
@@ -1764,6 +1928,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_decoded()
         self._refresh_rail()
         self._refresh_key()
+        self._refresh_practice()
         self._refresh_status()
 
     def _refresh_spectrum(self, blocks_this_tick: int) -> None:
@@ -2212,6 +2377,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _clear_sent(self) -> None:
         self._sent_dec.reset()
         self._sent_last = None
+        self._sent_runs = []
         if self._livekey is not None:
             self._sent_index = self._keyer.transition_count
         self._refresh_key()
@@ -2227,7 +2393,9 @@ class MainWindow(QtWidgets.QMainWindow):
             for t_ms, state in items:
                 if self._sent_last is not None and t_ms > self._sent_last[0]:
                     blocks = max(1, round((t_ms - self._sent_last[0]) / 10.0))
-                    self._sent_dec.feed(Run(self._sent_last[1], blocks))
+                    run = Run(self._sent_last[1], blocks)
+                    self._sent_runs.append(run)
+                    self._sent_dec.feed(run)
                 self._sent_last = (t_ms, state)
             if self._sent_last is not None and not self._sent_last[1]:
                 self._sent_dec.idle(lk.now_ms() - self._sent_last[0])

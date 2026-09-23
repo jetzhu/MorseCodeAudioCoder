@@ -1,3 +1,3 @@
 """Morse code audio decoder for a PC beeper."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"

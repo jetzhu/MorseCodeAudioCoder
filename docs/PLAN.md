@@ -227,7 +227,8 @@ decoder is not listening. The timing state machine is shared logic
 Candidate enhancements noted at the same time, not built:
 
 - A practice mode: show a word or call sign, key it, score against the
-  decoder's reading and measure speed and rhythm errors.
+  decoder's reading and measure speed and rhythm errors. Built 2026-09-22
+  (v0.1.5, section F).
 - Farnsworth timing for the encoder (characters at one speed, gaps at a
   slower one), the standard way to learn by ear.
 - Configurable key bindings and a sidetone pitch separate from the beeper

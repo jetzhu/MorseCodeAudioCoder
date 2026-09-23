@@ -30,6 +30,13 @@ while held, like an electronic keyer; holding both alternates and a tap during
 an element is remembered. The Sent line reads back what you keyed; with Feed
 the decoder on and the decoder listening, the decoder reads it too.
 
+## Practise
+
+The Practice strip draws a target (common words, call signs, digit groups or a
+mix); key it with the Key strip and the copy is graded when it matches or when
+you press Check: accuracy by edit distance, your speed, and how far your marks
+and gaps sit from the ideal 1 : 3 : 7 proportions.
+
 ## Download (Windows, no Python needed)
 
 Get `morse-console-windows-x64.zip` from the

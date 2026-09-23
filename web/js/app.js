@@ -22,6 +22,7 @@ import { MorseDecoder } from "./decoder.js";
 import { TonePlayer, buildGuide, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
 import { Keyer, LiveKey } from "./keyer.js";
+import { Practice, rhythm, score } from "./practice.js";
 import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
@@ -91,6 +92,9 @@ const el = {
   keypadStraight: $("keypadStraight"), keypadPaddle: $("keypadPaddle"),
   keyBtn: $("keyBtn"), ditBtn: $("ditBtn"), dahBtn: $("dahBtn"),
   sentOut: $("sentOut"), sentClear: $("sentClear"), keySpeed: $("keySpeed"), keyDit: $("keyDit"),
+  prWords: $("prWords"), prCalls: $("prCalls"), prDigits: $("prDigits"), prMixed: $("prMixed"),
+  prNext: $("prNext"), prCheck: $("prCheck"), prShowCode: $("prShowCode"), prTarget: $("prTarget"), prCode: $("prCode"),
+  prResult: $("prResult"), prAcc: $("prAcc"), prWpm: $("prWpm"), prRhythm: $("prRhythm"), prSession: $("prSession"),
   encDur: $("encDur"), encDit: $("encDit"), encGap: $("encGap"), encTone: $("encTone"),
   stateDot: $("stateDot"), stateV: $("stateV"), blockV: $("blockV"), dropV: $("dropV"), clockV: $("clockV"), rateV: $("rateV"),
   titleDev: $("titleDev"), factTone: $("factTone"), factRate: $("factRate"), factBlock: $("factBlock"),
@@ -1173,7 +1177,7 @@ liveKey.onChange = () => {
   dirty = true;
 };
 /** Local reading of what the operator keyed, independent of the decoder above. */
-const sent = { dec: new MorseDecoder(), index: 0, lastT: null, lastOn: false };
+const sent = { dec: new MorseDecoder(), index: 0, lastT: null, lastOn: false, /** @type {Run[]} */ runs: [] };
 const KEY_HELP = {
   straight: "Hold <b>Space</b> or the button: the tone sounds while it is held.",
   paddle: "<b>&larr;</b> sends dits and <b>&rarr;</b> sends dahs at the encoder speed; hold to repeat, hold both to alternate.",
@@ -1278,7 +1282,9 @@ function trackSent(nowMs) {
   sent.index = index;
   for (const [t, on] of items) {
     if (sent.lastT !== null && t > sent.lastT) {
-      sent.dec.feed(new Run(sent.lastOn, Math.max(1, Math.round((t - sent.lastT) / 10))));
+      const run = new Run(sent.lastOn, Math.max(1, Math.round((t - sent.lastT) / 10)));
+      sent.runs.push(run);
+      sent.dec.feed(run);
     }
     sent.lastT = t;
     sent.lastOn = on;
@@ -1290,8 +1296,80 @@ function clearSent() {
   sent.dec.reset();
   sent.lastT = null;
   sent.lastOn = false;
+  sent.runs = [];
   sent.index = keyer.transitionCount;
   dirty = true;
+}
+
+// --------------------------------------------------------------- practice
+
+const practice = new Practice("words");
+const pr = { checked: false, kindButtons: null };
+const KIND_BUTTON = { words: "prWords", calls: "prCalls", digits: "prDigits", mixed: "prMixed" };
+
+function setPracticeKind(kind) {
+  practice.setKind(kind);
+  for (const [k, id] of Object.entries(KIND_BUTTON)) el[id].setAttribute("aria-pressed", String(k === kind));
+}
+
+function practiceNext() {
+  const target = practice.nextTarget();
+  clearSent();
+  pr.checked = false;
+  el.prTarget.textContent = target;
+  el.prTarget.classList.remove("done");
+  el.prCode.textContent = encode(target).replace(/\./g, "·").replace(/-/g, "−");
+  el.prResult.textContent = "Key it with the Key strip above.";
+  el.prResult.className = "pr-result";
+  el.prAcc.innerHTML = "—<small>%</small>";
+  el.prWpm.innerHTML = "—<small>WPM</small>";
+  el.prRhythm.innerHTML = "—<small>%</small>";
+  updatePracticeSession();
+  dirty = true;
+}
+
+/** Runs between the operator's first and last mark, for the rhythm report. */
+function keyedRuns() {
+  const runs = sent.runs;
+  let a = 0;
+  let b = runs.length;
+  while (a < b && !runs[a].on) a++;
+  while (b > a && !runs[b - 1].on) b--;
+  return runs.slice(a, b);
+}
+
+function practiceCheck(auto = false) {
+  if (!practice.target || pr.checked) return;
+  const copy = sent.dec.text + (sent.dec.pendingCount ? "" : "");
+  const s = score(practice.target, copy);
+  if (auto && !s.perfect) return;
+  pr.checked = true;
+  practice.record(s);
+  const r = rhythm(keyedRuns(), sent.dec.ditMs);
+  el.prAcc.innerHTML = `${Math.round(100 * s.accuracy)}<small>%</small>`;
+  el.prWpm.innerHTML = `${sent.dec.timingReady || sent.runs.length >= 3 ? sent.dec.wpm.toFixed(1) : "—"}<small>WPM</small>`;
+  el.prRhythm.innerHTML = `${r.marks + r.gaps ? Math.round(r.errorPct) : "—"}<small>%</small>`;
+  if (s.perfect) {
+    el.prResult.textContent = "Correct. Press Next target to continue.";
+    el.prResult.className = "pr-result good";
+    el.prTarget.classList.add("done");
+  } else {
+    const sentText = s.sent || "(nothing)";
+    el.prResult.textContent = `You sent ${sentText}: ${s.errors} error${s.errors === 1 ? "" : "s"} against ${s.target}.`;
+    el.prResult.className = "pr-result bad";
+  }
+  updatePracticeSession();
+  dirty = true;
+}
+
+function updatePracticeSession() {
+  el.prSession.innerHTML = `${practice.correct}<small>/ ${practice.asked}</small>`;
+}
+
+/** Called every frame from updateKeyDom: grade automatically once the copy matches. */
+function updatePracticeDom() {
+  if (!practice.target || pr.checked) return;
+  if (sent.dec.text.trim() && !sent.dec.buffer && !sent.dec.pendingCount) practiceCheck(true);
 }
 
 function updateKeyDom() {
@@ -1303,6 +1381,7 @@ function updateKeyDom() {
   const shown = pendingSymbols.replace(/\./g, "·").replace(/-/g, "−");
   const text = sent.dec.text.length > 60 ? `…${sent.dec.text.slice(-60)}` : sent.dec.text;
   el.sentOut.innerHTML = escapeHtml(text) + (shown ? `<span class="sep"> ${shown}</span>` : "") || "&nbsp;";
+  updatePracticeDom();
   if (on) dirty = true;
 }
 
@@ -1452,6 +1531,12 @@ function wire() {
   window.addEventListener("keyup", (e) => onKeyboard(e, false));
   window.addEventListener("blur", releaseKeys);
   el.sentClear.addEventListener("click", clearSent);
+  for (const [kind, id] of Object.entries(KIND_BUTTON)) el[id].addEventListener("click", () => setPracticeKind(kind));
+  el.prNext.addEventListener("click", practiceNext);
+  el.prCheck.addEventListener("click", () => practiceCheck(false));
+  el.prShowCode.addEventListener("change", () => {
+    el.prCode.hidden = !el.prShowCode.checked;
+  });
   el.encCopy.addEventListener("click", () => {
     const done = () => {
       el.encCopy.textContent = "Copied";
@@ -1512,6 +1597,7 @@ function init() {
   setSpeedMode(false);
   buildEncoding();
   setKeyMode("straight");
+  setPracticeKind("words");
   wire();
   updateControls();
   updateStatus();
