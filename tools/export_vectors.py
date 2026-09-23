@@ -57,7 +57,7 @@ from morse.dsp import Goertzel  # noqa: E402
 from morse.pipeline import decode_samples, load_wav  # noqa: E402
 from morse.runs import Run  # noqa: E402
 from morse.table import encode  # noqa: E402
-from morse.tone_detector import ToneDetector  # noqa: E402
+from morse.tone_detector import ToneDetector, is_tonal  # noqa: E402
 
 __all__ = [
     "build_cases",
@@ -267,12 +267,23 @@ def build_cases() -> list[dict[str, Any]]:
         ),
         _decode_case(
             "lone-o-idle-flush",
-            "O alone at 15 WPM, then silence: three equal marks 3x the intra gaps. The dah rule "
-            "gives T = 80 ms; while runs are held back idle() waits for max(7T, 3.5 x 240) = 840 ms "
-            "(840 is not > 840, 850 is).",
+            "O alone at 15 WPM, then silence: three equal marks 3x the intra gaps. Three marks "
+            "make the estimate trusted and the dah rule gives T = 80 ms, so idle() flushes once "
+            "off_ms > 7T = 560 (560 is not > 560, 570 is).",
             make_runs("O", 15),
-            {**_text_parameters("O", 15), "idle_probe_ms": [560, 840, 850, 5000]},
-            idle_probe_ms=(560, 840, 850, 5000),
+            {**_text_parameters("O", 15), "idle_probe_ms": [560, 570, 600, 5000]},
+            idle_probe_ms=(560, 570, 600, 5000),
+        ),
+        _decode_case(
+            "glitches-after-hello-8wpm",
+            "HELLO WORLD at 8 WPM followed by keyboard clicks: 20 to 50 ms marks separated by "
+            "2 to 3 s of silence. Once the estimate is trusted, marks shorter than 0.4 T are "
+            "ignored and leave the timing untouched.",
+            make_runs("HELLO WORLD", 8) + [
+                Run(False, 200), Run(True, 3), Run(False, 200), Run(True, 4),
+                Run(False, 300), Run(True, 2), Run(False, 200), Run(True, 5), Run(False, 200),
+            ],
+            {**_text_parameters("HELLO WORLD", 8), "glitch_blocks": [3, 4, 2, 5]},
         ),
         _decode_case(
             "unknown-symbol",
@@ -304,12 +315,21 @@ def _full_blocks(x: np.ndarray, block_size: int) -> np.ndarray:
     return x.reshape(-1, block_size)
 
 
-def _detector_runs(series: Iterable[float], decoder: MorseDecoder | None = None) -> list[Run]:
-    """Default detector over ``series`` then ``flush``; optionally decode like ``Pipeline`` does."""
+def _detector_runs(
+    series: Iterable[float],
+    decoder: MorseDecoder | None = None,
+    tonal: Sequence[bool] | None = None,
+) -> list[Run]:
+    """Default detector over ``series`` then ``flush``; optionally decode like ``Pipeline`` does.
+
+    ``tonal`` gives the per-block flag ``Pipeline.process_block`` derives from
+    the block level (:func:`morse.tone_detector.is_tonal`); without it every
+    block counts as tonal.
+    """
     det = ToneDetector()
     runs: list[Run] = []
-    for power_db in series:
-        new = det.update(power_db)
+    for i, power_db in enumerate(series):
+        new = det.update(power_db, tonal=True if tonal is None else bool(tonal[i]))
         runs.extend(new)
         if decoder is not None:
             for run in new:
@@ -335,9 +355,12 @@ def build_fixture(stem: str, f0: float) -> dict[str, Any]:
     blocks = _full_blocks(x, BLOCK_SIZE)
     goertzel = Goertzel(f0, fs, BLOCK_SIZE)
     series = [goertzel.power_db(block) for block in blocks]
+    levels = [float(10.0 * np.log10(float(np.mean(np.square(block, dtype=np.float64))) + 1e-12))
+              for block in blocks]
+    tonal = [is_tonal(p, lvl) for p, lvl in zip(series, levels)]
 
     decoder = MorseDecoder()
-    runs = _detector_runs(series, decoder)
+    runs = _detector_runs(series, decoder, tonal)
 
     # The offline pipeline must agree, or the vectors would not describe decode_wav.
     ref_text, ref_runs = decode_samples(x, fs, f0, block_size=BLOCK_SIZE)
@@ -354,8 +377,10 @@ def build_fixture(stem: str, f0: float) -> dict[str, Any]:
         "samples": int(x.size),
         "blocks": len(series),
         "power_db": rounded,
+        "level_dbfs": [round(value, 1) for value in levels],
+        "tonal": [int(flag) for flag in tonal],
         "runs": [[run.on, run.blocks] for run in runs],
-        "runs_from_rounded_power_db_identical": _detector_runs(rounded) == runs,
+        "runs_from_rounded_power_db_identical": _detector_runs(rounded, tonal=tonal) == runs,
         "text": decoder.text,
     }
 

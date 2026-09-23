@@ -250,7 +250,7 @@ export class ToneDetector {
    * @param {number} powerDb
    * @returns {Run[]}
    */
-  update(powerDb) {
+  update(powerDb, tonal = true) {
     if (typeof powerDb !== "number") {
       throw new TypeError("ToneDetector.update: powerDb must be a number, got " + typeof powerDb);
     }
@@ -275,7 +275,9 @@ export class ToneDetector {
       on = this.#state;
       if (on) {
         if (pDb < this.#lo) on = false;
-      } else if (pDb > this.#hi) {
+      } else if (pDb > this.#hi && tonal) {
+        // A block that is not tonal (a click, speech) never switches an OFF
+        // detector ON, but it still teaches the noise level below.
         on = true;
       }
       if (on && this.#segments.length > 0) {
@@ -399,4 +401,39 @@ export class ToneDetector {
       ", current=" + (run.on ? "ON" : "off") + " " + run.blocks + " blocks)"
     );
   }
+}
+
+/** Blocks whose tone power sits further below the block's total power than this are broadband. */
+export const TONALITY_MIN_DB = -15.0;
+
+/** A pure sine's normalised Goertzel power is 3 dB above its mean square (A^2 vs A^2/2). */
+const PURE_TONE_OFFSET_DB = 3.0103;
+
+/**
+ * How much of a block's energy sits in the tone bin, in dB; 0 for a pure tone at `f0`.
+ *
+ * `powerDb` is the normalised Goertzel power (0 dB = full-scale sine) and
+ * `rmsDb` is `10*log10(mean square)` of the same block, as the worklet posts
+ * them. White noise or a click spreads its energy over the whole band, so its
+ * 100 Hz bin holds about 1/240 of it: around -24 dB here. A beeper
+ * concentrates its energy in the bin: around 0 dB.
+ *
+ * @param {number} powerDb @param {number} rmsDb @returns {number}
+ */
+export function tonalityDb(powerDb, rmsDb) {
+  return powerDb - rmsDb - PURE_TONE_OFFSET_DB;
+}
+
+/**
+ * Whether a block's energy is concentrated in the tone bin: the `tonal` flag
+ * for `ToneDetector.update`. A beeper block scores near 0 dB, white noise or
+ * a keyboard click near -24 dB; the default threshold sits at -15 dB. A block
+ * that fails is a broadband transient: it may teach the detector the noise
+ * level but must never switch it ON. Mirror of `morse.tone_detector.is_tonal`.
+ *
+ * @param {number} powerDb @param {number} rmsDb
+ * @param {number} [minTonalityDb=TONALITY_MIN_DB] @returns {boolean}
+ */
+export function isTonal(powerDb, rmsDb, minTonalityDb = TONALITY_MIN_DB) {
+  return tonalityDb(powerDb, rmsDb) >= minTonalityDb;
 }

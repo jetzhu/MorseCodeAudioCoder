@@ -836,3 +836,33 @@ def test_default_detector_finds_four_tones_in_the_beeper_fixture():
     assert got[0].on is False
     assert abs(got[0].ms - 690.0) <= 60.0, got[0]
     assert got[-1].on is False
+
+
+# ------------------------------------------------------------ tonal flag
+
+
+def test_is_tonal_and_tonality_db():
+    from morse.tone_detector import TONALITY_MIN_DB, is_tonal, tonality_db
+
+    assert TONALITY_MIN_DB == -15.0
+    assert abs(tonality_db(-41.0, -44.0103)) < 1e-6  # a pure sine: 0 dB
+    assert tonality_db(-64.0, -40.0) < -20.0  # white noise: about -24 dB
+    assert is_tonal(-41.0, -44.0) is True
+    assert is_tonal(-64.0, -40.0) is False
+
+
+def test_non_tonal_blocks_teach_the_noise_level_but_never_switch_on():
+    det = ToneDetector()
+    feed(det, [-90.0] * LEAD)
+    assert det.state is False
+    floor_before = det.floor_db
+    for _ in range(5):
+        det.update(-40.0, tonal=False)  # loud click blocks
+    assert det.state is False, "a click never switches ON"
+    assert det.floor_db > floor_before + 20.0, "but the noise level followed it"
+    feed(det, [-90.0] * 200)  # the level settles again
+    assert det.state is False
+    det.update(-40.0, tonal=True)
+    assert det.state is True, "the same power, tonal, does switch ON"
+    det.update(-40.0, tonal=False)
+    assert det.state is True, "while ON the flag is ignored: a click does not chop the mark"

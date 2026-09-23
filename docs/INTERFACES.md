@@ -107,9 +107,10 @@ class ToneDetector:
                  signal_decay_db: float = 0.1, silence_floor_db: float = -100.0,
                  warmup_blocks: int = 30, max_on_blocks: int = 500,
                  release_db: float = 12.0, hysteresis_db: float = 3.0): ...
-    def update(self, power_db: float) -> list[Run]
+    def update(self, power_db: float, tonal: bool = True) -> list[Run]
         # feed one block; returns runs that are now final (debounced), oldest first,
-        # usually [] and occasionally one or more
+        # usually [] and occasionally one or more; tonal=False (a broadband block) can
+        # never switch an OFF detector ON but still updates the noise level
     def flush(self) -> list[Run]        # emit everything pending, including the current run
     def reset(self) -> None
     state: bool                          # current ON/OFF verdict
@@ -184,6 +185,19 @@ more than at moderate ratios. Real recordings at 1 m gave an offset near
 10 ms; synthetic tests use a 10 ms tail. Fast keying above 20 WPM in a very
 reverberant room is the case most likely to suffer.
 
+Module functions (2026-09-22): `tonality_db(power_db, level_dbfs)` returns
+`power_db − level_dbfs − 3.01`, which is 0 for a pure tone at `f0` and about
+−24 for white noise or a click (a 100 Hz bin holds 1/240 of broadband
+energy). `is_tonal(power_db, level_dbfs, min_tonality_db=TONALITY_MIN_DB)` is the
+`tonal` flag for `update`: `tonality_db >= −15`. `update(power_db,
+tonal=True)`: a block that is not tonal can never switch an OFF detector ON,
+but it still updates the noise level like any OFF block (an earlier design
+that reported such blocks at the floor starved the noise tracker and produced
+false marks during the loopback fixture's fade-in); while ON the flag is
+ignored, so a click during a mark does not chop it. Mirrored by `tonalityDb`,
+`isTonal`, `TONALITY_MIN_DB` and `update(powerDb, tonal)` in
+`web/js/detector.js`.
+
 ## morse/decoder.py
 
 ```python
@@ -199,6 +213,7 @@ class MorseDecoder:
     wpm: float                           # 1200 / dit_ms
     timing_ready: bool                   # False while the first runs are held back (see below)
     pending_count: int                   # runs held back
+    provisional: str                     # what the held runs read as under the current estimate, e.g. '.. -'; '' when none
     buffer: str                          # pending symbols, e.g. '.-'
     text: str                            # everything emitted so far
     letter_count: int
@@ -210,7 +225,20 @@ dit from a fast dah, and the old 150 ms seed misread every message that
 opened with T, M, O or a digit ("OSO" became "SSO", "TEST" became "IST") and
 every message slower than 5 WPM. Runs are therefore held back until the
 estimate is trusted: both mark classes seen (longest mark ≥ 2 × shortest)
-or five marks. The held runs are then classified in one go. While holding,
+or three marks, except that three marks of one class that look like dahs
+(≥ 2.5 × the shortest gap) with no letter gap yet to arbitrate wait for a
+letter gap or five marks, since reverberant dits with jitter look the same.
+The held runs are then classified in one go. Once trusted,
+a mark whose measured length is below `0.4 T` is a glitch (a click): it is
+neither a symbol nor timing evidence, and a gap below `0.4 T` is treated the
+same way, so clicks after a message cannot shrink the dit estimate (which
+used to turn everything after them into dahs and word gaps). Four such marks
+in a row with Morse-like spacing (each preceded by a gap shorter than eight
+times its own length) are a faster keying speed, not clicks: a valve opens
+and short marks are accepted until a long gap closes it again, so the window
+adapts; a click after silence always resets the count. Measured lengths, not
+corrected ones, are compared, so a transitional offset estimate cannot lock a
+new speed out. While holding,
 `idle()` flushes after the longer of `7T` and `3.5 ×` the longest held mark
 (that mark may be a dah whose letter gap is as long as itself), using the
 best estimate available; a lone mark falls back to the seed (below 300 ms is
@@ -252,6 +280,7 @@ class BlockResult:
     new_text: str                        # text emitted by the decoder during this block
     runs: list[Run]                      # runs finalised during this block
     filtered: np.ndarray                 # band-passed block for display
+    tonality_db: float                   # tone power minus block power minus 3 dB: 0 for a pure tone, about -24 for noise
 
 class Pipeline:
     def __init__(self, fs: int = 48000, block_size: int = 480, f0: float = 2491.0,
@@ -273,7 +302,10 @@ def decode_wav(path: str, f0: float, wpm: float | None = None,
 
 `process_block` order: sanitise (a block containing NaN or inf is replaced by
 zeros and counted in `bad_blocks: int`), rms level, band-pass, Goertzel dB,
-detector update, decoder feed for each finalised run, then
+detector update with `tonal=is_tonal(power_db, level_dbfs)` (a block whose
+tone power is more than 15 dB below its total power plus 3 dB is a broadband
+transient: keyboard clicks, doors and speech teach the noise level but never
+switch the detector ON), decoder feed for each finalised run, then
 `decoder.idle(current OFF run ms)` when the current run is OFF. The
 `Pipeline` constructs `ToneDetector()` with the contract defaults and does not
 override any threshold parameter. `set_frequency(f0)` validates
@@ -417,6 +449,12 @@ Behavioural requirements
   analysis chain, so Play is decoded regardless of speakers, microphone and
   OS processing. Firefox on Windows receives the processed microphone, which
   removes the machine's own output; Chromium browsers open the raw path.
+- Per block the page calls `detector.update(powerDb, isTonal(powerDb, rmsDb))`,
+  exactly like `Pipeline.process_block`.
+- While the decoder holds runs back, the pending-letter slot shows
+  `decoder.provisional` dimmed with the hint "estimating speed…". In Auto
+  mode the disabled speed field follows the live estimate once
+  `timingReady`, so switching to Manual starts from the measured speed.
 - Keying-guide labels: every letter is labelled (`layoutGuideLabels`); only a
   label that would overlap its predecessor is skipped. Speed inputs accept
   2 to 40 WPM.
@@ -499,7 +537,9 @@ widget. Design detail:
   pipeline, advancing with the input clock (a software loopback). Keying-guide
   labels use `layout_guide_labels`, the mirror of the web function. Speed
   spin boxes accept 2 to 40 WPM. The Auto/Manual switch hands timing over with
-  `MorseDecoder.adopt_timing`.
+  `MorseDecoder.adopt_timing`. In Auto mode the disabled speed spin follows the
+  live estimate once `timing_ready`; while runs are held back the pending-letter
+  label shows `provisional` dimmed with the hint "estimating speed…".
 - Status bar: listening state, block size, dropped blocks, elapsed time.
 
 A 30 Hz QTimer drains `AudioInput` and feeds `Pipeline`.

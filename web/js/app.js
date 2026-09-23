@@ -17,7 +17,7 @@
  */
 
 import { encode, lookup } from "./table.js";
-import { ToneDetector } from "./detector.js";
+import { ToneDetector, isTonal } from "./detector.js";
 import { MorseDecoder } from "./decoder.js";
 import { TonePlayer, buildGuide, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
@@ -200,7 +200,8 @@ function onBlock(m) {
 
 /** The `Pipeline.process_block` order: detector, decoder feed, idle, then the display buffers. */
 function processBlock(powerDb, rmsDb) {
-  for (const run of detector.update(powerDb)) feedRun(run);
+  // A loud but broadband block (click, speech) never switches the detector ON.
+  for (const run of detector.update(powerDb, isTonal(powerDb, rmsDb))) feedRun(run);
   const current = detector.currentRun;
   if (!current.on) decoder.idle(current.ms);
   trackFragments(detector.state);
@@ -1157,10 +1158,14 @@ player.onEnd = () => {
 function updateDom() {
   const cur = detector.currentRun;
   const live = state.running && cur.on ? (cur.ms - decoder.offsetMs < 2 * decoder.ditMs ? "·" : "−") : "";
-  const shown = decoder.buffer.replace(/\./g, "·").replace(/-/g, "−");
-  el.sym.innerHTML = shown + (live ? `<span class="cur">${live}</span>` : "") || "&nbsp;";
+  // While the speed estimate settles the held-back runs are shown dimmed, as
+  // they read under the current estimate; the final reading replaces them.
+  const pending = decoder.pendingCount > 0;
+  const shown = (pending ? decoder.provisional : decoder.buffer).replace(/\./g, "·").replace(/-/g, "−");
+  const symbolHtml = pending ? `<span class="prov">${shown}</span>` : shown;
+  el.sym.innerHTML = symbolHtml + (live ? `<span class="cur">${live}</span>` : "") || "&nbsp;";
   const guess = decoder.buffer ? lookup(decoder.buffer) : null;
-  el.hint.textContent = decoder.buffer ? `→ ${guess || "?"}` : "";
+  el.hint.textContent = pending ? "estimating speed…" : decoder.buffer ? `→ ${guess || "?"}` : "";
 
   if (!decoder.text && !state.everRan) {
     el.text.innerHTML = `<span class="placeholder">Decoded letters appear here. Press Start, then key on the beeper; or press Play tone below to hear the encoder and watch this decoder read it back.</span>`;
@@ -1182,6 +1187,11 @@ function updateDom() {
   const snr = state.running && !detector.warmingUp ? (detector.peakDb - detector.floorDb).toFixed(0) : "—";
   el.snr.innerHTML = `${snr}<small>dB</small>`;
   el.wpm.innerHTML = `${have ? decoder.wpm.toFixed(1) : "—"}<small>WPM</small>`;
+  // In Auto mode the (disabled) speed field follows the live estimate, so a
+  // switch to Manual starts from the measured speed.
+  if (!state.manual) {
+    el.wpmVal.value = decoder.timingReady ? String(Math.round(clamp(decoder.wpm, 2, 40))) : String(state.wpmManual);
+  }
   el.cnt.textContent = String(decoder.letterCount);
   el.unk.textContent = String(decoder.unknownCount);
   const s = Math.floor((state.blocks * state.blockMs) / 1000);

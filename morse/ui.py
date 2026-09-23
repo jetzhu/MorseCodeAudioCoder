@@ -1684,17 +1684,24 @@ class MainWindow(QtWidgets.QMainWindow):
             cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
             self.text_view.setTextCursor(cursor)
             self.text_view.ensureCursorVisible()
-        shown = dec.buffer.replace(".", "·").replace("-", "−")
+        # While the speed estimate settles the held-back runs are shown dimmed,
+        # as they read under the current estimate; the final reading replaces them.
+        pending = dec.pending_count > 0
+        shown = (dec.provisional if pending else dec.buffer).replace(".", "·").replace("-", "−")
         current = det.current_run
         live = ""
         if current.on and current.blocks > 0 and not det.warming_up:
             live = "·" if (current.ms - dec.offset_ms) < 2.0 * dec.dit_ms else "−"
         t = self.theme
         html_text = html.escape(shown)
+        if pending and html_text:
+            html_text = f'<span style="color:{t.ink3}">{html_text}</span>'
         if live:
             html_text += f'<span style="color:{t.ink3}">{live}</span>'
         self.symbol_label.setText(html_text or " ")
-        if dec.buffer:
+        if pending:
+            self.symbol_hint.setText("estimating speed…")
+        elif dec.buffer:
             char = table.lookup(dec.buffer)
             self.symbol_hint.setText(f"→ {char if char else '?'}")
         else:
@@ -1727,6 +1734,14 @@ class MainWindow(QtWidgets.QMainWindow):
             ro["Speed"].set_value(f"{self.wpm_spin.value()}", "WPM")
         else:
             ro["Speed"].set_value(f"{dec.wpm:.1f}" if have else "—", "WPM")
+            # The disabled speed spin follows the live estimate in Auto mode, so
+            # a switch to Manual starts from the measured speed.
+            if dec.timing_ready:
+                live_wpm = int(round(min(WPM_MAX, max(WPM_MIN, dec.wpm))))
+                if self.wpm_spin.value() != live_wpm:
+                    self.wpm_spin.blockSignals(True)
+                    self.wpm_spin.setValue(live_wpm)
+                    self.wpm_spin.blockSignals(False)
         ro["Letters"].set_value(str(dec.letter_count))
         ro["Unknown"].set_value(str(dec.unknown_count))
 

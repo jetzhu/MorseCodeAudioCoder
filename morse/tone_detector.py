@@ -57,7 +57,7 @@ import math
 
 from morse.runs import Run
 
-__all__ = ["ToneDetector"]
+__all__ = ["ToneDetector", "TONALITY_MIN_DB", "is_tonal", "tonality_db"]
 
 _DB_FLOOR = 1e-12
 """Added to linear power before ``log10`` (matches ``morse.dsp.Goertzel.power_db``)."""
@@ -252,13 +252,20 @@ class ToneDetector:
         return self._segments[-1].to_run(self.block_ms)
 
     # --------------------------------------------------------------- feeding
-    def update(self, power_db: float) -> list[Run]:
+    def update(self, power_db: float, tonal: bool = True) -> list[Run]:
         """Feed one block's tone power in dB.
 
         Returns the runs that became final during this block, oldest first.
         Usually empty; occasionally one run (or more if the debounce settings
         allow several to complete at once).  A non-finite value is treated as
         digital silence.
+
+        ``tonal`` says whether the block's energy sits in the tone bin (see
+        :func:`is_tonal`).  A block that is not tonal, a keyboard click or
+        speech, can never switch an OFF detector ON, but it still teaches the
+        noise level, so room noise rising after a silent lead-in is followed
+        as usual.  While ON the flag is ignored: a click during a mark does
+        not chop it.
         """
         p_db = float(power_db)
         if math.isnan(p_db) or p_db == math.inf:
@@ -281,7 +288,7 @@ class ToneDetector:
             if on:
                 if p_db < self._lo:
                     on = False
-            elif p_db > self._hi:
+            elif p_db > self._hi and tonal:
                 on = True
             if on and self._segments:
                 current = self._segments[-1]
@@ -378,3 +385,33 @@ class ToneDetector:
             f"lo={self._lo:.1f} dB, hi={self._hi:.1f} dB, "
             f"warming_up={self.warming_up}, current={self.current_run})"
         )
+
+
+TONALITY_MIN_DB: float = -15.0
+"""Blocks whose tone power sits further below the block's total power than this are broadband."""
+
+_PURE_TONE_OFFSET_DB = 3.0103
+"""A pure sine's normalised Goertzel power is 3 dB above its mean square (A^2 vs A^2/2)."""
+
+
+def tonality_db(power_db: float, level_dbfs: float) -> float:
+    """How much of a block's energy sits in the tone bin, in dB; 0 for a pure tone at ``f0``.
+
+    ``power_db`` is the normalised Goertzel power (0 dB = full-scale sine) and
+    ``level_dbfs`` is ``10*log10(mean square)`` of the same block.  White noise
+    or a click spreads its energy over the whole band, so its 100 Hz bin holds
+    about 1/240 of it: around -24 dB here.  A beeper concentrates its energy
+    in the bin: around 0 dB, still above -10 dB with a room tail on top.
+    """
+    return power_db - level_dbfs - _PURE_TONE_OFFSET_DB
+
+
+def is_tonal(power_db: float, level_dbfs: float, min_tonality_db: float = TONALITY_MIN_DB) -> bool:
+    """Whether a block's energy is concentrated in the tone bin: the ``tonal`` flag for ``update``.
+
+    A beeper block scores near 0 dB, white noise or a keyboard click near
+    -24 dB; the default threshold sits at -15 dB.  A block that fails is a
+    broadband transient: it may teach the detector the noise level but must
+    never switch it ON.  Mirrored by ``isTonal`` in ``web/js/detector.js``.
+    """
+    return tonality_db(power_db, level_dbfs) >= min_tonality_db

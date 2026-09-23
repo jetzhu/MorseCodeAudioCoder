@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { Goertzel } from "../js/dsp.js";
-import { ToneDetector } from "../js/detector.js";
+import { ToneDetector, isTonal } from "../js/detector.js";
 import { MorseDecoder } from "../js/decoder.js";
 import { Run } from "../js/runs.js";
 import { readWav } from "./wav.mjs";
@@ -56,7 +56,10 @@ function decodeSamples(samples, fs, f0, { wpm = null, blockSize = BLOCK_SIZE } =
 
   const feedBlock = (block) => {
     const powerDb = goertzel.powerDb(block);
-    for (const run of detector.update(powerDb)) {
+    let sumSq = 0;
+    for (let k = 0; k < block.length; k++) sumSq += block[k] * block[k];
+    const levelDb = 10 * Math.log10(sumSq / block.length + 1e-12); // the pipeline's level_dbfs
+    for (const run of detector.update(powerDb, isTonal(powerDb, levelDb))) {
       runs.push(run);
       text += decoder.feed(run);
     }

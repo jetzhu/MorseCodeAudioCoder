@@ -906,3 +906,44 @@ def test_app_live_mode_rejects_bad_frequency_before_opening_audio(monkeypatch, c
     assert app.main(["--no-ui", "--freq", "30000"]) == 1
     err = capsys.readouterr().err
     assert err.startswith("error:") and "fs/2" in err
+
+
+# ------------------------------------------------------------ broadband gate
+
+
+def _on_runs_of(x: np.ndarray, fs: int = FS, blk: int = 480, f0: float = 2491.0) -> list[Run]:
+    pipe = Pipeline(fs=fs, block_size=blk, f0=f0)
+    runs: list[Run] = []
+    for i in range(x.size // blk):
+        runs += pipe.process_block(x[i * blk:(i + 1) * blk]).runs
+    runs += pipe.detector.flush()
+    return [r for r in runs if r.on]
+
+
+def test_broadband_click_never_switches_the_detector_on_but_a_tone_burst_does():
+    # 3 s of room noise at -80 dBFS; at t = 1 s either a 60 ms broadband burst
+    # at -30 dBFS (a keyboard click, 50 dB above the room) or a 60 ms tone burst
+    # at -20 dBFS. The click spreads its energy over the whole band, so the tone
+    # bin holds about 1/240 of it: the gate reports it at the noise floor.
+    rng = np.random.default_rng(7)
+    room = rng.normal(0.0, 10 ** (-80 / 20), 3 * FS).astype(np.float32)
+    n = int(0.06 * FS)
+    i0 = FS
+    click = room.copy()
+    click[i0:i0 + n] += rng.normal(0.0, 10 ** (-30 / 20), n).astype(np.float32)
+    tone = room.copy()
+    tone[i0:i0 + n] += (0.1 * np.sin(2 * np.pi * 2491.0 * np.arange(n) / FS)).astype(np.float32)
+    assert _on_runs_of(click) == []
+    on = _on_runs_of(tone)
+    assert len(on) == 1 and abs(on[0].ms - 60.0) <= 30.0
+
+
+def test_block_result_reports_tonality():
+    pipe = Pipeline(fs=FS, block_size=480, f0=2491.0)
+    t = np.arange(480) / FS
+    pure = (0.3 * np.sin(2 * np.pi * 2491.0 * t)).astype(np.float32)
+    assert abs(pipe.process_block(pure).tonality_db) < 1.0
+    rng = np.random.default_rng(1)
+    noise = rng.normal(0.0, 0.01, 480).astype(np.float32)
+    values = [pipe.process_block(noise).tonality_db for _ in range(50)]
+    assert np.median(values) < -15.0

@@ -33,7 +33,11 @@ Hold-back
 Without a WPM seed a mark alone cannot tell a slow dit from a fast dah, so
 runs are held back (``timing_ready`` False, ``pending_count`` > 0) until the
 estimate is trusted: both mark classes seen (longest mark >= 2 x shortest)
-or five marks. The held runs are then classified in one go with that
+or three marks (five, or a letter gap, when three marks of one class look
+like dahs: reverberant dits with jitter look the same). Once trusted, a mark
+shorter than ``0.4 T`` is a click and ignored, unless four arrive in a row
+with Morse-like spacing, which is a faster speed and opens a valve until the
+next long gap. The held runs are then classified in one go with that
 estimate, so a message may open with T, M, O or a digit and may be keyed at
 2 WPM. While holding, ``idle()`` flushes after the longer of ``7T`` and
 ``3.5 x`` the longest held mark, using the best estimate available (a lone
@@ -79,7 +83,11 @@ _LETTER_GAP = 2.0  # corrected gap >= this * T ends the letter
 _WORD_GAP = 5.0  # corrected gap >= this * T ends the word
 _IDLE_FLUSH = 7.0  # idle OFF (corrected) > this * T flushes the pending letter
 _TRUST_RATIO = 2.0  # longest/shortest mark >= this: both mark classes have been seen
-_TRUST_MARKS = 5  # ... or this many marks: the estimate is trusted and classification starts
+_TRUST_MARKS = 3  # ... or this many marks: the estimate is trusted and classification starts
+_GLITCH_FRACTION = 0.4  # trusted: a measured run shorter than this * T is a glitch, not a symbol
+_GLITCH_STREAK_MAX = 4  # ... unless this many arrive in a row: then the keying got faster
+_GLITCH_STREAK_GAP_FACTOR = 8.0  # a short mark after a gap longer than this * its length is a click
+_TRUST_MARKS_AMBIGUOUS = 5  # single-class, dah-like marks with no letter gap yet: wait for this many
 _DAH_RULE_RATIO = 2.5  # single-class marks >= this * shortest gap are dahs, not dits
 _PENDING_IDLE_FACTOR = 3.5  # untrusted: idle flush waits this * longest pending mark
 _FRAGMENT_MS = 20.0  # marks this short never anchor the dit class (debounce leftovers)
@@ -163,6 +171,8 @@ class MorseDecoder:
         # a WPM seed makes the estimate trusted from the start).
         self._pending: list[Run] = []
         self._trusted: bool = self._wpm is not None
+        self._glitch_streak: int = 0
+        self._last_gap_ms: float | None = None
 
         self.dit_ms: float = self._seed_dit_ms()
         self.offset_ms: float = 0.0
@@ -184,7 +194,7 @@ class MorseDecoder:
 
         Without a WPM seed the first runs are held back: a mark alone cannot
         tell a slow dit from a fast dah. The estimate is trusted once both
-        mark classes have been seen (longest mark >= 2 x shortest) or five
+        mark classes have been seen (longest mark >= 2 x shortest) or three
         marks have arrived; the held runs are then decoded in one go.
         """
         return self._trusted
@@ -193,6 +203,23 @@ class MorseDecoder:
     def pending_count(self) -> int:
         """Number of final runs held back while the estimate is not yet trusted."""
         return len(self._pending)
+
+    @property
+    def provisional(self) -> str:
+        """What the held-back runs read as under the current estimate, e.g. ``'... -'``.
+
+        Dits and dahs of the runs in :attr:`pending_count`, with a space at
+        each gap that would end a letter; empty when nothing is held. Shown
+        by the UIs while the speed estimate settles, and replaced by the
+        final reading when the runs are replayed.
+        """
+        out = ""
+        for run in self._pending:
+            if run.on:
+                out += "." if run.ms - self.offset_ms < _DIT_DAH_SPLIT * self.dit_ms else "-"
+            elif run.ms + self.offset_ms >= _LETTER_GAP * self.dit_ms and out and not out.endswith(" "):
+                out += " "
+        return out
 
     def adopt_timing(self, other: MorseDecoder) -> None:
         """Take over ``other``'s recent-run windows and trust state, then recompute.
@@ -228,24 +255,39 @@ class MorseDecoder:
         letter decodes cleanly.
         """
         ms = float(run.ms)
+        settled = self._trusted and not self._pending
         if run.on:
             if ms >= self.max_mark_ms:
                 self.buffer = ""
                 self._pending.clear()
                 return ""
+            if settled and ms < _GLITCH_FRACTION * self.dit_ms:
+                # A click, far shorter than a dit: not a symbol, not timing
+                # evidence. Four in a row with Morse spacing are a faster speed
+                # instead: the valve opens and stays open until a long gap, so
+                # the window adapts. A click after silence always resets it.
+                if self._last_gap_ms is not None and self._last_gap_ms > _GLITCH_STREAK_GAP_FACTOR * ms:
+                    self._glitch_streak = 0
+                self._glitch_streak += 1
+                if self._glitch_streak < _GLITCH_STREAK_MAX:
+                    return ""
+                self._glitch_streak = _GLITCH_STREAK_MAX
             self._marks.append(ms)
             self._seen_mark = True
             self._update_timing()
-            if self._trusted and not self._pending:
+            if settled:
                 return self._classify_mark(ms)
             self._pending.append(run)
             return self._replay() if self._trusted else ""
 
+        self._last_gap_ms = ms
         if not self._seen_mark:
             return ""  # leading silence carries no information
+        if settled and ms < _GLITCH_FRACTION * self.dit_ms:
+            return ""  # the gap around a glitch or a dropout: inside the letter, not timing evidence
         self._gaps.append(ms)
         self._update_timing()
-        if self._trusted and not self._pending:
+        if settled:
             return self._classify_gap(ms)
         if not self._pending:
             return ""  # untrusted with nothing held: an idle flush already closed the letter
@@ -289,6 +331,8 @@ class MorseDecoder:
         self.unknown_count = 0
         self._seen_mark = False
         self._pending.clear()
+        self._glitch_streak = 0
+        self._last_gap_ms = None
         if not keep_timing:
             self._marks.clear()
             self._gaps.clear()
@@ -367,8 +411,22 @@ class MorseDecoder:
             else:
                 self.dit_ms = (m + g) / 2.0
                 self.offset_ms = d
-        if not self._trusted and (not single_class or len(self._marks) >= _TRUST_MARKS):
-            self._trusted = True
+        if not self._trusted:
+            # Three marks of one class are enough, unless they look like dahs
+            # (>= 2.5 x the shortest gap) with no letter gap yet to arbitrate:
+            # reverberant dits with jitter look the same, so wait for a letter
+            # gap or five marks.
+            n = len(self._marks)
+            ambiguous = single_class and m >= _DAH_RULE_RATIO * g
+            if (not single_class or n >= _TRUST_MARKS_AMBIGUOUS
+                    or (n >= _TRUST_MARKS and (not ambiguous or self._second_gap_class(m, g) is not None))):
+                self._trusted = True
+
+    def _second_gap_class(self, m: float, g: float) -> float | None:
+        """The shortest recent gap at least twice ``g`` (a letter or word gap), capped at ``20 m``."""
+        cap = _GAP_CAP_FACTOR * m
+        longer = [min(x, cap) for x in self._gaps if min(x, cap) >= _TRUST_RATIO * g]
+        return min(longer) if longer else None
 
     def _marks_are_dahs(self, m: float, g: float) -> bool:
         """Single-class window with ``m >= 2.5 g``: dahs (``3T + d``) or reverberant dits?
@@ -379,11 +437,9 @@ class MorseDecoder:
         closer in log distance. Dahs: letter ``(m + 3g) / 2``, word
         ``(3m + 5g) / 2``. Dits: letter ``m + 2g``, word ``3m + 4g``.
         """
-        cap = _GAP_CAP_FACTOR * m
-        longer = [min(x, cap) for x in self._gaps if min(x, cap) >= _TRUST_RATIO * g]
-        if not longer:
+        g2 = self._second_gap_class(m, g)
+        if g2 is None:
             return True
-        g2 = min(longer)
 
         def score(letter: float, word: float) -> float:
             return min(abs(log(g2 / letter)), abs(log(g2 / word)))

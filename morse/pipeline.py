@@ -41,7 +41,7 @@ import numpy as np
 from morse.decoder import MorseDecoder
 from morse.dsp import BandPass, Goertzel
 from morse.runs import Run
-from morse.tone_detector import ToneDetector
+from morse.tone_detector import ToneDetector, is_tonal, tonality_db
 
 __all__ = [
     "BlockResult",
@@ -93,6 +93,8 @@ class BlockResult:
     """Runs that became final during this block, oldest first."""
     filtered: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.float32))
     """Band-passed copy of the block (``float32``) for the waveform display."""
+    tonality_db: float = 0.0
+    """Tone power relative to the block's total power: 0 for a pure tone, about -24 for noise."""
 
 
 class Pipeline:
@@ -185,7 +187,9 @@ class Pipeline:
         power_db = self.goertzel.power_db(x)
 
         det = self.detector
-        runs = det.update(power_db)
+        # A loud but broadband block (click, speech) never switches the detector
+        # ON, though it still teaches it the noise level.
+        runs = det.update(power_db, tonal=is_tonal(power_db, level_dbfs))
         new_text = self._feed_runs(runs)
         current = det.current_run
         if not current.on:
@@ -203,6 +207,7 @@ class Pipeline:
             new_text=new_text,
             runs=runs,
             filtered=filtered,
+            tonality_db=tonality_db(power_db, level_dbfs),
         )
 
     def flush(self) -> str:

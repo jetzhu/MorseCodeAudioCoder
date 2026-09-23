@@ -31,7 +31,11 @@
  * Without a WPM seed a mark alone cannot tell a slow dit from a fast dah, so
  * runs are held back (`timingReady` false, `pendingCount` > 0) until the
  * estimate is trusted: both mark classes seen (longest mark >= 2 x shortest)
- * or five marks. The held runs are then classified in one go, so a message
+ * or three marks (five, or a letter gap, when three marks of one class look
+ * like dahs: reverberant dits with jitter look the same). Once trusted, a mark
+ * shorter than `0.4 T` is a click and ignored, unless four arrive in a row
+ * with Morse-like spacing, which is a faster speed and opens a valve until
+ * the next long gap. The held runs are then classified in one go, so a message
  * may open with T, M, O or a digit and may be keyed at 2 WPM. While holding,
  * `idle()` flushes after the longer of `7T` and `3.5 x` the longest held mark.
  *
@@ -66,7 +70,11 @@ const LETTER_GAP = 2.0; // corrected gap >= this * T ends the letter
 const WORD_GAP = 5.0; // corrected gap >= this * T ends the word
 const IDLE_FLUSH = 7.0; // idle OFF (corrected) > this * T flushes the pending letter
 const TRUST_RATIO = 2.0; // longest/shortest mark >= this: both mark classes have been seen
-const TRUST_MARKS = 5; // ... or this many marks: the estimate is trusted and classification starts
+const TRUST_MARKS = 3; // ... or this many marks: the estimate is trusted and classification starts
+const GLITCH_FRACTION = 0.4; // trusted: a measured run shorter than this * T is a glitch, not a symbol
+const GLITCH_STREAK_MAX = 4; // ... unless this many arrive in a row: then the keying got faster
+const GLITCH_STREAK_GAP_FACTOR = 8.0; // a short mark after a gap longer than this * its length is a click
+const TRUST_MARKS_AMBIGUOUS = 5; // single-class, dah-like marks with no letter gap yet: wait for this many
 const DAH_RULE_RATIO = 2.5; // single-class marks >= this * shortest gap are dahs, not dits
 const PENDING_IDLE_FACTOR = 3.5; // untrusted: idle flush waits this * longest pending mark
 const FRAGMENT_MS = 20.0; // marks this short never anchor the dit class (debounce leftovers)
@@ -184,6 +192,10 @@ export class MorseDecoder {
     this._pending = [];
     /** @type {boolean} */
     this._trusted = this._wpm !== null;
+    /** @type {number} consecutive marks rejected as glitches */
+    this._glitchStreak = 0;
+    /** @type {number | null} length of the most recent gap run */
+    this._lastGapMs = null;
 
     /** @type {number} */
     this.ditMs = this._seedDitMs();
@@ -223,26 +235,41 @@ export class MorseDecoder {
    */
   feed(run) {
     const ms = Number(run.ms);
+    const settled = this._trusted && !this._pending.length;
     if (run.on) {
       if (ms >= this.maxMarkMs) {
         this.buffer = "";
         this._pending.length = 0;
         return "";
       }
+      // A click, far shorter than a dit: not a symbol, not timing evidence.
+      // Four in a row with Morse spacing are a faster speed instead, so the
+      // valve lets them through and the window adapts.
+      // The valve opens and stays open until a long gap; a click after
+      // silence always resets it.
+      if (settled && ms < GLITCH_FRACTION * this.ditMs) {
+        if (this._lastGapMs !== null && this._lastGapMs > GLITCH_STREAK_GAP_FACTOR * ms) this._glitchStreak = 0;
+        this._glitchStreak += 1;
+        if (this._glitchStreak < GLITCH_STREAK_MAX) return "";
+        this._glitchStreak = GLITCH_STREAK_MAX;
+      }
       this._marks.push(ms);
       this._seenMark = true;
       this._updateTiming();
-      if (this._trusted && !this._pending.length) return this._classifyMark(ms);
+      if (settled) return this._classifyMark(ms);
       this._pending.push({ on: true, ms });
       return this._trusted ? this._replay() : "";
     }
 
+    this._lastGapMs = ms;
     if (!this._seenMark) {
       return ""; // leading silence carries no information
     }
+    // The gap around a glitch or a dropout: inside the letter, not timing evidence.
+    if (settled && ms < GLITCH_FRACTION * this.ditMs) return "";
     this._gaps.push(ms);
     this._updateTiming();
-    if (this._trusted && !this._pending.length) return this._classifyGap(ms);
+    if (settled) return this._classifyGap(ms);
     if (!this._pending.length) return ""; // untrusted with nothing held: an idle flush already closed the letter
     this._pending.push({ on: false, ms });
     return this._trusted ? this._replay() : "";
@@ -252,7 +279,7 @@ export class MorseDecoder {
    * `true` once the estimate is trusted and runs are classified as they
    * arrive. Without a WPM seed the first runs are held back: a mark alone
    * cannot tell a slow dit from a fast dah. The estimate is trusted once both
-   * mark classes have been seen (longest mark >= 2 x shortest) or five marks
+   * mark classes have been seen (longest mark >= 2 x shortest) or three marks
    * have arrived; the held runs are then decoded in one go.
    * @returns {boolean}
    */
@@ -263,6 +290,22 @@ export class MorseDecoder {
   /** Number of final runs held back while the estimate is not yet trusted. @returns {number} */
   get pendingCount() {
     return this._pending.length;
+  }
+
+  /**
+   * What the held-back runs read as under the current estimate, e.g. `"... -"`:
+   * dits and dahs of the pending runs with a space at each gap that would end
+   * a letter; empty when nothing is held. Shown by the UI while the speed
+   * estimate settles and replaced by the final reading on replay.
+   * @returns {string}
+   */
+  get provisional() {
+    let out = "";
+    for (const r of this._pending) {
+      if (r.on) out += r.ms - this.offsetMs < DIT_DAH_SPLIT * this.ditMs ? "." : "-";
+      else if (r.ms + this.offsetMs >= LETTER_GAP * this.ditMs && out && !out.endsWith(" ")) out += " ";
+    }
+    return out;
   }
 
   /**
@@ -335,6 +378,8 @@ export class MorseDecoder {
     this.unknownCount = 0;
     this._seenMark = false;
     this._pending.length = 0;
+    this._glitchStreak = 0;
+    this._lastGapMs = null;
     if (!keepTiming) {
       this._marks.clear();
       this._gaps.clear();
@@ -425,7 +470,28 @@ export class MorseDecoder {
         this.offsetMs = d;
       }
     }
-    if (!this._trusted && (!singleClass || marks.length >= TRUST_MARKS)) this._trusted = true;
+    if (!this._trusted) {
+      // Three marks of one class are enough, unless they look like dahs
+      // (>= 2.5 x the shortest gap) with no letter gap yet to arbitrate:
+      // reverberant dits with jitter look the same, so wait for a letter gap
+      // or five marks.
+      const n = marks.length;
+      const ambiguous = singleClass && m >= DAH_RULE_RATIO * g;
+      if (!singleClass || n >= TRUST_MARKS_AMBIGUOUS ||
+          (n >= TRUST_MARKS && (!ambiguous || this._secondGapClass(m, g) !== null))) {
+        this._trusted = true;
+      }
+    }
+  }
+
+  /**
+   * The shortest recent gap at least twice `g` (a letter or word gap), capped at `20 m`.
+   * @param {number} m @param {number} g @returns {number | null}
+   */
+  _secondGapClass(m, g) {
+    const cap = GAP_CAP_FACTOR * m;
+    const longer = this._gaps.items.map((x) => Math.min(x, cap)).filter((x) => x >= TRUST_RATIO * g);
+    return longer.length ? Math.min(...longer) : null;
   }
 
   /**
@@ -440,10 +506,8 @@ export class MorseDecoder {
    * @param {number} m @param {number} g @returns {boolean}
    */
   _marksAreDahs(m, g) {
-    const cap = GAP_CAP_FACTOR * m;
-    const longer = this._gaps.items.map((x) => Math.min(x, cap)).filter((x) => x >= TRUST_RATIO * g);
-    if (!longer.length) return true;
-    const g2 = Math.min(...longer);
+    const g2 = this._secondGapClass(m, g);
+    if (g2 === null) return true;
     const score = (letter, word) => Math.min(Math.abs(Math.log(g2 / letter)), Math.abs(Math.log(g2 / word)));
     return score((m + 3.0 * g) / 2.0, (3.0 * m + 5.0 * g) / 2.0) <= score(m + 2.0 * g, 3.0 * m + 4.0 * g);
   }

@@ -857,35 +857,57 @@ test("a 25 dB noise jump recovers and stays OFF", () => {
 
 // ------------------------------------------- recorded fixtures, defaults only
 
-/** Default detector over a series, then flush; returns `[on, blocks]` pairs like vectors.json. */
-function detectorPairs(series) {
+/**
+ * Default detector over a series (with per-block tonal flags, as the pipeline
+ * feeds them), then flush; returns `[on, blocks]` pairs like vectors.json.
+ */
+function detectorPairs(series, tonal = null) {
   const det = new ToneDetector();
-  const runs = feed(det, series);
+  const runs = [];
+  series.forEach((v, i) => runs.push(...det.update(v, tonal ? Boolean(tonal[i]) : true)));
   runs.push(...det.flush());
   assert.ok(runs.every((r) => r instanceof Run && r.blockMs === 10.0));
   return runs.map((r) => [r.on, r.blocks]);
 }
 
+/** `10*log10(mean square)` per block, the pipeline's level measure. */
+function levelSeries(samples, block) {
+  const n = Math.floor(samples.length / block);
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    for (let k = i * block; k < (i + 1) * block; k++) sum += samples[k] * samples[k];
+    out[i] = 10 * Math.log10(sum / block + 1e-12);
+  }
+  return out;
+}
+
 for (const [name, fixture] of Object.entries(vectors.fixtures)) {
   test(`default detector reproduces the Python run list on ${name} (rounded series)`, () => {
     assert.equal(fixture.runs_from_rounded_power_db_identical, true);
-    const pairs = detectorPairs(fixture.power_db);
+    assert.equal(fixture.tonal.length, fixture.blocks);
+    const pairs = detectorPairs(fixture.power_db, fixture.tonal);
     assert.deepEqual(pairs, fixture.runs);
     assert.equal(pairs.reduce((a, [, b]) => a + b, 0), fixture.blocks);
   });
 
-  test(`default detector reproduces the Python run list on ${name} (JS Goertzel series)`, () => {
+  test(`default detector reproduces the Python run list on ${name} (JS Goertzel series)`, async () => {
+    const { isTonal } = await import("../js/detector.js");
     const wav = readWav(new URL(fixture.file, ROOT));
     const series = goertzelSeries(wav.samples, fixture.f0, wav.sampleRate, fixture.block_size);
+    const levels = levelSeries(wav.samples, fixture.block_size);
     assert.equal(series.length, fixture.blocks);
-    assert.deepEqual(detectorPairs(series), fixture.runs);
+    const tonal = series.map((p, i) => isTonal(p, levels[i]));
+    assert.deepEqual(tonal.map(Number), fixture.tonal, "tonal flags agree with Python");
+    assert.deepEqual(detectorPairs(series, tonal), fixture.runs);
   });
 }
 
 test("the loopback fixture gives nine marks with the keyed proportions", () => {
   const fixture = vectors.fixtures.loopback_sos_1khz_15wpm;
   const det = new ToneDetector();
-  const got = feed(det, fixture.power_db);
+  const got = [];
+  fixture.power_db.forEach((v, i) => got.push(...det.update(v, Boolean(fixture.tonal[i]))));
   got.push(...det.flush());
   const marks = got.filter((r) => r.on).map((r) => r.ms);
   assert.equal(marks.length, 9);
@@ -908,7 +930,8 @@ test("the loopback fixture gives nine marks with the keyed proportions", () => {
 test("the beeper fixture gives four tones with the measured gaps", () => {
   const fixture = vectors.fixtures.beeper_long_2491hz_1m;
   const det = new ToneDetector();
-  const got = feed(det, fixture.power_db);
+  const got = [];
+  fixture.power_db.forEach((v, i) => got.push(...det.update(v, Boolean(fixture.tonal[i]))));
   got.push(...det.flush());
   const on = got.filter((r) => r.on).map((r) => r.ms);
   assert.equal(on.length, 4, JSON.stringify(on));
@@ -920,4 +943,31 @@ test("the beeper fixture gives four tones with the measured gaps", () => {
   assert.equal(got[0].on, false);
   assert.ok(Math.abs(got[0].ms - 690.0) <= 60.0, String(got[0]));
   assert.equal(got[got.length - 1].on, false);
+});
+
+// ---------------------------------------------------------- broadband gate
+
+test("isTonal and the tonal flag: a click teaches the noise level but never switches ON", async () => {
+  const { isTonal, tonalityDb, TONALITY_MIN_DB } = await import("../js/detector.js");
+  assert.equal(TONALITY_MIN_DB, -15);
+  assert.ok(Math.abs(tonalityDb(-41, -44.0103)) < 1e-9, "pure tone: 0 dB");
+  assert.ok(tonalityDb(-64, -40) < -20, "white noise: about -24 dB");
+  assert.equal(isTonal(-41, -44), true);
+  assert.equal(isTonal(-64, -40), false);
+
+  const det = new ToneDetector();
+  for (let i = 0; i < 40; i++) det.update(-90);
+  assert.equal(det.state, false);
+  const floorBefore = det.floorDb;
+  for (let i = 0; i < 5; i++) det.update(-40, false); // loud click blocks, not tonal
+  assert.equal(det.state, false, "never ON");
+  assert.ok(det.floorDb > floorBefore + 20, "but the noise level followed them");
+  // a tonal block of the same power does switch ON once the level has settled again
+  for (let i = 0; i < 200; i++) det.update(-90);
+  assert.equal(det.state, false);
+  det.update(-40, true);
+  assert.equal(det.state, true);
+  // while ON the flag is ignored: a click during a mark does not chop it
+  det.update(-40, false);
+  assert.equal(det.state, true);
 });

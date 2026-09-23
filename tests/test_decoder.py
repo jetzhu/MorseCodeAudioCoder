@@ -211,7 +211,7 @@ def test_digits_and_punctuation_decode():
 # ------------------------------------------------------- hold-back and dah rule
 
 
-@pytest.mark.parametrize("text", ["OSO", "TEST", "MOM", "MORSE CODE", "OK", "0 TO 9", "TTT EEE"])
+@pytest.mark.parametrize("text", ["OSO", "TEST", "MOM", "MORSE CODE", "OK", "0 TO 9", "TT EEE"])
 @pytest.mark.parametrize("wpm", [8, 15, 25])
 def test_messages_opening_with_dah_letters_decode_without_a_seed(text: str, wpm: int):
     emitted, dec = decode_runs(make_runs(text, wpm))
@@ -231,23 +231,29 @@ def test_runs_are_held_back_until_the_estimate_is_trusted():
     dec = MorseDecoder()
     runs = make_runs("SOS", 3)  # 400 ms dits: the old seed read the first one as a dah
     assert dec.timing_ready is False
-    # S: three marks of one class plus two gaps. Not trusted yet, nothing emitted.
-    out = "".join(dec.feed(r) for r in runs[:6])
+    # dit, gap, dit: two equal marks, one class. Not trusted yet, nothing emitted,
+    # but the held runs read as two dits under the interim estimate.
+    out = "".join(dec.feed(r) for r in runs[:3])
     assert out == "" and dec.buffer == "" and dec.timing_ready is False
-    assert dec.pending_count == 6
-    # The first dah of O makes both classes visible: everything replays at once.
-    out = dec.feed(runs[6])
+    assert dec.pending_count == 3
+    assert dec.provisional == ".."
+    # gap, third dit: three marks are enough. Everything replays into the buffer.
+    out = "".join(dec.feed(r) for r in runs[3:5])
     assert dec.timing_ready is True and dec.pending_count == 0
-    assert out == "S" and dec.buffer == "-"
+    assert out == "" and dec.buffer == "..."
+    assert dec.provisional == ""
+    # The letter gap closes S; the first dah of O is classified as it arrives.
+    assert dec.feed(runs[5]) == "S"
+    assert dec.feed(runs[6]) == "" and dec.buffer == "-"
     assert dec.dit_ms == pytest.approx(400.0)
 
 
-def test_five_marks_of_one_class_are_enough_to_trust():
+def test_three_marks_of_one_class_are_enough_to_trust():
     dec = MorseDecoder()
-    out = "".join(dec.feed(r) for r in make_runs("EIS", 10))  # dits only: E I S
-    assert dec.timing_ready is True  # trusted at the 5th mark
+    out = "".join(dec.feed(r) for r in make_runs("EI", 10))  # dits only: E I
+    assert dec.timing_ready is True  # trusted at the 3rd mark
     out += dec.idle(1_000_000)
-    assert out.strip() == "EIS"
+    assert out.strip() == "EI"
 
 
 def test_idle_flushes_held_runs_with_the_best_estimate():
@@ -281,9 +287,9 @@ def test_held_runs_wait_for_a_slow_letter_gap_before_flushing():
 
 def test_overlong_mark_clears_held_runs_too():
     dec = MorseDecoder()
-    for r in make_runs("S", 3):
+    for r in make_runs("S", 3)[:3]:  # dit, gap, dit: still held
         dec.feed(r)
-    assert dec.pending_count > 0
+    assert dec.pending_count == 3
     assert dec.feed(Run(True, 600)) == ""  # 6 s: not a symbol
     assert dec.pending_count == 0 and dec.buffer == ""
     assert dec.unknown_count == 0
@@ -758,9 +764,9 @@ def test_long_mark_while_idle_leaves_nothing_to_flush():
     dec = MorseDecoder()
     for run in make_runs("S", 15):
         dec.feed(run)
-    assert dec.pending_count == 5  # S is held back until the estimate is trusted
+    assert dec.buffer == "..." and dec.pending_count == 0  # trusted at the third dit
     dec.feed(SIX_SECOND_MARK)
-    assert dec.pending_count == 0
+    assert dec.buffer == ""
     assert dec.idle(float("inf")) == ""
     assert dec.text == ""
 
@@ -846,3 +852,67 @@ def test_max_mark_ms_survives_reset():
 def test_max_mark_ms_must_be_positive(bad: float):
     with pytest.raises(ValueError):
         MorseDecoder(max_mark_ms=bad)
+
+
+# ------------------------------------------------------------- glitch rejection
+
+
+def test_glitch_marks_after_a_message_are_ignored():
+    # Keyboard clicks after HELLO WORLD at 8 WPM (T = 150): 20 to 50 ms marks far
+    # apart. They used to become E and, worse, shrink the dit estimate so that
+    # everything after read as dahs and word gaps.
+    noise = [
+        Run(False, 200), Run(True, 3), Run(False, 200), Run(True, 4),
+        Run(False, 300), Run(True, 2), Run(False, 200), Run(True, 5), Run(False, 200),
+    ]
+    emitted, dec = decode_runs(make_runs("HELLO WORLD", 8) + noise)
+    assert emitted == "HELLO WORLD "
+    assert dec.letter_count == 10 and dec.unknown_count == 0
+    assert dec.dit_ms == pytest.approx(150.0) and dec.offset_ms == 0.0
+
+
+def test_glitch_inside_a_letter_is_ignored_with_its_short_gaps():
+    # S at 8 WPM with a 30 ms click in the middle of the second intra gap
+    # (50 + 30 + 70 = 150 ms). The click and the 50 ms gap are dropped; the
+    # 70 ms gap is inside the letter.
+    dit = Run(True, 15)
+    glitched_s = [dit, Run(False, 15), dit, Run(False, 5), Run(True, 3), Run(False, 7), dit]
+    emitted, dec = decode_runs(make_runs("HELLO", 8) + [Run(False, 105)] + glitched_s)
+    assert emitted == "HELLO S "
+    assert dec.dit_ms == pytest.approx(150.0, rel=0.15)
+
+
+def test_glitch_rule_only_applies_once_the_estimate_is_trusted():
+    # Before trust a short mark is evidence like any other (it may be a fast dit).
+    dec = MorseDecoder()
+    assert dec.feed(Run(True, 3)) == ""
+    assert dec.pending_count == 1
+    emitted, dec = decode_runs(make_runs("SOS", 40))  # 30 ms dits are legitimate at 40 WPM
+    assert emitted.strip() == "SOS"
+
+
+def test_provisional_reading_of_held_runs():
+    dec = MorseDecoder()
+    o_runs = make_runs("O", 8)  # 450 ms dahs
+    assert dec.feed(o_runs[0]) == ""
+    assert dec.provisional == "-"  # against the 150 ms seed a 450 ms mark is a dah
+    dec.reset()
+    e_runs = make_runs("E", 15)
+    dec.feed(e_runs[0])
+    assert dec.provisional == "."
+    dec2 = MorseDecoder()
+    for r in make_runs("EE", 2):  # 600 ms dits, 1800 ms letter gap: two marks, still held
+        dec2.feed(r)
+    assert dec2.timing_ready is False
+    assert dec2.provisional == ". ."  # letter gap shown as a space
+
+
+def test_a_real_speed_up_of_three_times_is_accepted_through_the_valve():
+    # 5 WPM (240 ms dits) then 15 WPM (80 ms dits): the new dits are under
+    # 0.4 x 240 = 96 ms and would all be rejected as clicks. Four in a row with
+    # Morse spacing open the valve, the window adapts and the text recovers.
+    runs = make_runs("PARIS PARIS", 5) + [Run(False, 168)] + make_runs("PARIS PARIS PARIS", 15)
+    emitted, dec = decode_runs(runs)
+    assert emitted.startswith("PARIS PARIS ")
+    assert emitted.endswith("PARIS "), emitted
+    assert dec.dit_ms == pytest.approx(80.0, rel=0.1)
