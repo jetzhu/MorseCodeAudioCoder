@@ -827,6 +827,9 @@ SETTINGS_WEIGHT = "key/weight"
 """QSettings key: weight in percent."""
 SETTINGS_REF_OPEN = "reference/open"
 """QSettings key: whether the Morse chart (section G) is shown."""
+SETTINGS_STAR_NUDGED = "star/nudged"
+"""QSettings key: the one-time request to star the repository has been shown."""
+REPO_URL = "https://github.com/jetzhu/MorseCodeAudioCoder"
 DEFAULT_SIDETONE_HZ = 600
 """A comfortable pitch to key with; the beeper's 2491 Hz is shrill to sit next to."""
 SIDETONE_MAX_HZ = 4000
@@ -2014,6 +2017,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pr_readouts["Timing error"].set_value(f"{round(rep.error_pct)}" if rep.marks + rep.gaps else "\u2014", "%")
         t = self.theme
         if result.perfect:
+            self._maybe_star_nudge()
             self.pr_result_label.setText("Correct. Press Next target to continue.")
             self.pr_result_label.setStyleSheet(f"color: {t.good}; font-weight: 600;")
             self.pr_target_label.setStyleSheet(f"color: {t.good};")
@@ -2057,7 +2061,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_error.setFont(font)
         lay.addStretch(1)
         lay.addWidget(self.status_error)
+        # A quiet, permanent link; a one-time nudge makes it bold after the first success.
+        self.status_star = QtWidgets.QLabel()
+        self.status_star.setFont(font)
+        self.status_star.setTextFormat(Qt.TextFormat.RichText)
+        self.status_star.setOpenExternalLinks(True)
+        self.status_star.setToolTip("Stars are how projects like this get found")
+        self._star_nudged = str(self.settings.value(SETTINGS_STAR_NUDGED, "0")).strip() in ("1", "true")
+        self._set_star_text(nudge=False)
+        lay.addWidget(self.status_star)
         return bar
+
+    def _set_star_text(self, nudge: bool) -> None:
+        t = self.theme
+        if nudge:
+            self.status_star.setText(f'Useful? <a href="{REPO_URL}" style="color:{t.ink}; font-weight:600;">'
+                                     f'\u2605 Star it on GitHub</a>')
+        else:
+            self.status_star.setText(f'<a href="{REPO_URL}" style="color:{t.ink3}; text-decoration:none;">'
+                                     f'\u2605 Star on GitHub</a>')
+
+    def _maybe_star_nudge(self) -> None:
+        """Ask once, at a moment the app has just done something for the person."""
+        if self._star_nudged:
+            return
+        self._star_nudged = True
+        self.settings.setValue(SETTINGS_STAR_NUDGED, "1")
+        self._set_star_text(nudge=True)
 
     def _apply_stylesheet(self) -> None:
         t = self.theme
@@ -2598,6 +2628,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log.add(text, self.pipeline.elapsed_ms, time.time())
             if hasattr(self, "log_button"):
                 self.log_button.setEnabled(True)
+            if " " in text and self._log.text.strip() and hasattr(self, "status_star"):
+                self._maybe_star_nudge()  # a whole word decoded
 
     def log_header(self) -> list[tuple[str, str]]:
         """The lines above the table in an exported log."""

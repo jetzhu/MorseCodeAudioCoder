@@ -491,6 +491,13 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Star on GitHub (2026-09-23, v0.1.12): a quiet link in the page footer and
+  download panel with the live star count (one `GET` of the repository from
+  api.github.com, named in the About privacy sentence), and in the desktop
+  status bar; a one-time nudge ("Useful? Star it on GitHub") after the first
+  decoded word or the first correct practice target, remembered in
+  localStorage `morse.star.nudged` / QSettings `star/nudged`. No third-party
+  scripts. README carries shields.io badges.
 - Reference chart (2026-09-23, v0.1.11): section G in both apps, built from
   `morse/reference.py` / `web/js/reference.js` (`chart_entries(table)`:
   letters, digits, then punctuation by code length, code, character;

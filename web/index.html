@@ -245,6 +245,12 @@
       <button class="x" id="noteDismiss" aria-label="Dismiss" title="Dismiss">×</button>
     </div>
 
+    <div class="msgbar star" id="starNudge" role="status" hidden>
+      <span class="icon" aria-hidden="true">★</span>
+      <span class="txt">Useful? <a id="starNudgeLink" href="https://github.com/jetzhu/MorseCodeAudioCoder" target="_blank" rel="noopener">Star it on GitHub</a>. Shown once; nothing is tracked.</span>
+      <button class="x" id="starNudgeDismiss" aria-label="Dismiss" title="Dismiss">×</button>
+    </div>
+
     <div class="body">
       <div class="main">
         <section class="panel" aria-label="Spectrum">
@@ -492,6 +498,7 @@
         works on machines where the browser only gets a processed signal, and it needs no browser and no
         internet connection.</p>
       <p class="muted" id="dlNote">Looking up the latest release…</p>
+      <p class="muted"><a class="star" href="https://github.com/jetzhu/MorseCodeAudioCoder" target="_blank" rel="noopener">★ Star on GitHub<span class="starcount" data-starcount></span></a> if the page or the app is useful to you: stars are how projects like this get found.</p>
     </div>
     <div class="assets" id="dlAssets">
       <span class="k">Downloads</span>
@@ -550,8 +557,8 @@
           you can rebind. The Practice strip hands out words, call signs and number groups and grades your
           copy and rhythm. The decoded log, with the time each word arrived, can be downloaded. A Morse code chart at the bottom of the console lists the 26 letters, 10 digits and the punctuation marks . , ? / = ' ( ) : ; + - _ " @ ! with their codes; the letter being keyed or decoded lights up in it, and clicking a character plays it.</p>
         <h3>Privacy</h3>
-        <p>Everything runs in this browser tab. No audio, text or settings are sent anywhere; the only network
-          requests are for the fonts and the release list of the desktop app on GitHub.</p>
+        <p>Everything runs in this browser tab. No audio, text or settings are sent anywhere; the only network requests are for the fonts and, from GitHub, the release list of the desktop app and the
+          repository's star count.</p>
         <h3>Browsers and the desktop app</h3>
         <p>Chrome and Edge give the page the raw microphone signal. Firefox on Windows supplies a processed
           signal that suppresses steady tones, so the desktop app, which reads the raw endpoint and needs no
@@ -575,6 +582,7 @@
   <div class="foot">
     Chrome or Edge recommended. Source and issues: <a href="https://github.com/jetzhu/MorseCodeAudioCoder">github.com/jetzhu/MorseCodeAudioCoder</a>.
     The <a href="mock.html">design mock</a> shows the same window on simulated audio.
+    <a class="star" id="starLink" href="https://github.com/jetzhu/MorseCodeAudioCoder" target="_blank" rel="noopener">★ Star on GitHub<span class="starcount" data-starcount></span></a>
   </div>
 </div>
 

@@ -98,6 +98,13 @@ Other places that fit: the Hackaday tip line (the beeper angle), the
 awesome-ham-radio lists on GitHub (open a pull request adding the link), QRZ
 and eHam forums, and your radio club's newsletter.
 
+## 4b. Stars from the page itself
+
+The page and the desktop app carry a quiet "Star on GitHub" link (footer,
+download panel, status bar) and ask once, after the first decoded word or the
+first correct practice target. Nothing pushier: no popups, no repeats, no
+third-party button scripts.
+
 ## 5. Watch and adjust
 
 After a few weeks, Search Console's Performance report shows impressions per

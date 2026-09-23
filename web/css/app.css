@@ -167,6 +167,13 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
 }
 .msgbar button.x:hover { color: var(--ink); background: var(--panel); }
 .msgbar.note { background: var(--panel-2); }
+.msgbar.star { background: var(--panel-2); }
+.msgbar.star .icon { color: var(--trace); }
+.msgbar.star a { color: var(--ink); font-weight: 600; }
+a.star { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+a.star:hover { color: var(--ink); text-decoration: underline; }
+a.star .starcount:not(:empty)::before { content: " · "; }
+.foot a.star { margin-left: 8px; }
 
 .body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
 .main { display: grid; grid-template-rows: 212px 232px minmax(168px, auto); border-right: 1px solid var(--line); min-width: 0; }

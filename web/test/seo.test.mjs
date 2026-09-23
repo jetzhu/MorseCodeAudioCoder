@@ -70,3 +70,10 @@ test("the chart is in the HTML and matches the shared table", () => {
   assert.ok(html.includes("Morse code simulator"));
   assert.ok(/<h3>Is this a Morse code simulator\?<\/h3>/.test(html));
 });
+
+test("the star links and the one-time nudge are in the page", () => {
+  assert.ok(html.includes('id="starLink"'));
+  assert.ok(html.includes('id="starNudge"') && html.includes("hidden"));
+  assert.equal((html.match(/data-starcount/g) || []).length, 2, "footer and download panel");
+  assert.ok(html.includes("repository's star count"), "the privacy sentence names the extra request");
+});

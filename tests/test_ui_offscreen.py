@@ -653,3 +653,19 @@ def test_reference_chart_toggles_lights_and_plays(qapp, window: ui.MainWindow, s
         assert not other._ref_open
     finally:
         other.close()
+
+
+def test_star_link_and_one_time_nudge(qapp, window: ui.MainWindow, settings) -> None:
+    assert ui.REPO_URL in window.status_star.text()
+    assert "Useful?" not in window.status_star.text()
+    drive_replay(window)  # decodes SOS and, at the flush, the word space
+    assert "Useful?" in window.status_star.text()
+    assert str(settings.value(ui.SETTINGS_STAR_NUDGED)) == "1"
+    settings.sync()
+    other = ui.make_window(replay_args(), settings=settings)
+    try:
+        assert "Useful?" not in other.status_star.text(), "asked once per install"
+        other._log_emit("A ")
+        assert "Useful?" not in other.status_star.text()
+    finally:
+        other.close()

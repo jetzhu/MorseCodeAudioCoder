@@ -45,6 +45,8 @@ const HIST_MARKS = 30;
 /** Auto-detect accepts a peak only this far above the band median. */
 const AUTO_MIN_PROMINENCE_DB = 10;
 const RELEASES_API = "https://api.github.com/repos/jetzhu/MorseCodeAudioCoder/releases/latest";
+const REPO_API = "https://api.github.com/repos/jetzhu/MorseCodeAudioCoder";
+const STORE_STAR_NUDGE = "morse.star.nudged";
 const RELEASES_PAGE = "https://github.com/jetzhu/MorseCodeAudioCoder/releases";
 const REPO_GIT = "https://github.com/jetzhu/MorseCodeAudioCoder.git";
 const STORAGE = { device: "morse.deviceId", f0: "morse.f0", micProc: "morse.micProcessing" };
@@ -85,6 +87,7 @@ const el = {
   msgBar: $("msgBar"), msgText: $("msgText"), msgDismiss: $("msgDismiss"),
   chopHint: $("chopHint"), chopDismiss: $("chopDismiss"),
   noteBar: $("noteBar"), noteText: $("noteText"), noteDismiss: $("noteDismiss"),
+  starNudge: $("starNudge"), starNudgeLink: $("starNudgeLink"), starNudgeDismiss: $("starNudgeDismiss"),
   f0Label: $("f0Label"), specInfo: $("specInfo"),
   sym: $("symBuf"), hint: $("symHint"), text: $("textOut"),
   dit: $("ditV"), dah: $("dahV"), lgap: $("lgapV"), off: $("offV"),
@@ -221,7 +224,40 @@ const log = new DecodedLog();
 
 /** Stamp newly decoded text with the audio clock and the computer clock. */
 function logEmit(text) {
-  if (text) log.add(text, state.blocks * state.blockMs, Date.now());
+  if (!text) return;
+  log.add(text, state.blocks * state.blockMs, Date.now());
+  if (text.includes(" ") && log.text.trim()) maybeStarNudge(); // a whole word decoded
+}
+
+// ------------------------------------------------------------------- stars
+
+/**
+ * One quiet request to star the repository, at a moment the page has just
+ * done something for the person (first decoded word, first correct practice
+ * target). Shown once per browser; dismissing or following the link ends it.
+ */
+function maybeStarNudge() {
+  if (store.get(STORE_STAR_NUDGE) === "1" || !el.starNudge.hidden) return;
+  el.starNudge.hidden = false;
+}
+
+function endStarNudge() {
+  store.set(STORE_STAR_NUDGE, "1");
+  el.starNudge.hidden = true;
+}
+
+/** Read the repository's star count from GitHub and show it next to the star links. */
+async function loadStarCount() {
+  try {
+    const r = await fetch(REPO_API, { headers: { Accept: "application/vnd.github+json" } });
+    if (!r.ok) return;
+    const info = await r.json();
+    const n = Number(info.stargazers_count);
+    if (!Number.isFinite(n)) return;
+    for (const span of document.querySelectorAll("[data-starcount]")) span.textContent = `${n} ${n === 1 ? "star" : "stars"}`;
+  } catch {
+    /* offline or rate-limited: the link stands without a count */
+  }
 }
 
 /** The `Pipeline.process_block` order: detector, decoder feed, idle, then the display buffers. */
@@ -1626,6 +1662,7 @@ function practiceCheck(auto = false) {
   if (auto && !s.perfect) return;
   pr.checked = true;
   practice.record(s);
+  if (s.perfect) maybeStarNudge();
   const r = rhythm(keyedRuns(), sent.dec.ditMs);
   el.prAcc.innerHTML = `${Math.round(100 * s.accuracy)}<small>%</small>`;
   el.prWpm.innerHTML = `${sent.dec.timingReady || sent.runs.length >= 3 ? sent.dec.wpm.toFixed(1) : "—"}<small>WPM</small>`;
@@ -1802,6 +1839,9 @@ function wire() {
     el.chopHint.hidden = true;
     state.chopDismissed = true;
   });
+  el.starNudgeDismiss.addEventListener("click", endStarNudge);
+  el.starNudgeLink.addEventListener("click", endStarNudge);
+  loadStarCount();
   el.noteDismiss.addEventListener("click", () => {
     el.noteBar.hidden = true;
   });

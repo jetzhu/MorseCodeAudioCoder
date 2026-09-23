@@ -1,5 +1,9 @@
 # Beeper Morse Console: Morse code simulator, decoder and trainer
 
+[![GitHub stars](https://img.shields.io/github/stars/jetzhu/MorseCodeAudioCoder?style=social)](https://github.com/jetzhu/MorseCodeAudioCoder/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/jetzhu/MorseCodeAudioCoder?display_name=tag)](https://github.com/jetzhu/MorseCodeAudioCoder/releases/latest)
+[![CI](https://github.com/jetzhu/MorseCodeAudioCoder/actions/workflows/ci.yml/badge.svg)](https://github.com/jetzhu/MorseCodeAudioCoder/actions/workflows/ci.yml)
+
 Live page: <https://jetzhu.github.io/MorseCodeAudioCoder/> (browser, nothing
 uploaded). Windows desktop app on the [releases page](https://github.com/jetzhu/MorseCodeAudioCoder/releases/latest).
 
