@@ -15,7 +15,18 @@
  *   the dah paddle likewise with dahs. Holding both alternates (iambic). A
  *   paddle tapped during an element is remembered and sent after it, so a
  *   quick "dit, dah" gives a clean A. Releasing during an element never cuts
- *   it short.
+ *   it short. Iambic A (default): letting go of both paddles ends the
+ *   character with the element in progress. Iambic B: when both paddles were
+ *   squeezed during an element and both are released, one more element of
+ *   the opposite kind follows.
+ * - `bug`: a semi-automatic key. The dit paddle sends automatic dits while
+ *   held; the dah paddle is a straight key (tone while held), so every dah
+ *   is made by hand. Pressing the lever cuts a dit short; dits resume one
+ *   space after it is let go if the dit paddle is still held.
+ * - Weighting (paddle and bug elements): `dahRatio` is the dah length in
+ *   dits (3 standard); `weight` in percent (50 standard) lengthens every
+ *   mark and shortens the space after it by the same amount: mark `w T`
+ *   (dit) or `(ratio + w - 1) T` (dah), space `(2 - w) T`, `w = weight / 50`.
  *
  * `LiveKey` plays the keyer's tone through a persistent oscillator whose gain
  * is automated on the AudioContext clock (3 ms exponential edges, no clicks);
@@ -24,27 +35,43 @@
  * the module imports in Node.
  */
 
-const MODES = new Set(["straight", "paddle"]);
+const MODES = new Set(["straight", "paddle", "bug"]);
 const PADDLES = new Set(["dit", "dah"]);
+const IAMBIC = new Set(["A", "B"]);
 const LOG_MAX = 4000;
 const MAX_ELEMENTS_PER_TICK = 64;
+/** Allowed dah length in dits (3 is standard). */
+export const DAH_RATIO_RANGE = [2, 5];
+/** Allowed weight in percent (50 is standard). */
+export const WEIGHT_RANGE = [25, 75];
 
 export class Keyer {
   /**
    * @param {number} [ditMs=150] dit length for paddle elements (`1200 / wpm`)
-   * @param {"straight" | "paddle"} [mode="straight"]
+   * @param {"straight" | "paddle" | "bug"} [mode="straight"]
+   * @param {object} [options]
+   * @param {"A" | "B"} [options.iambic="A"]
+   * @param {number} [options.dahRatio=3] dah length in dits
+   * @param {number} [options.weight=50] weight in percent
    */
-  constructor(ditMs = 150, mode = "straight") {
+  constructor(ditMs = 150, mode = "straight", { iambic = "A", dahRatio = 3, weight = 50 } = {}) {
     if (!(ditMs > 0)) throw new RangeError(`ditMs must be positive, got ${ditMs}`);
-    if (!MODES.has(mode)) throw new RangeError(`mode must be 'straight' or 'paddle', got ${mode}`);
+    if (!MODES.has(mode)) throw new RangeError(`mode must be 'straight', 'paddle' or 'bug', got ${mode}`);
+    if (!IAMBIC.has(iambic)) throw new RangeError(`iambic must be 'A' or 'B', got ${iambic}`);
     this.ditMs = ditMs;
     this.mode = mode;
+    this.iambic = iambic;
+    this.dahRatio = 3;
+    this.weight = 50;
+    this.setWeighting(dahRatio, weight);
     this._held = { dit: false, dah: false };
     /** @type {string[]} */
     this._memory = [];
     this._phase = "idle";
     /** @type {string | null} */
     this._current = null;
+    this._squeezed = false; // both paddles held at some moment during the current element
+    this._manual = false; // bug mode: the dah lever is holding the tone
     this._elementEnd = 0;
     this._gapEnd = 0;
     /** @type {Array<[number, boolean]>} */
@@ -66,28 +93,72 @@ export class Keyer {
    * @param {"straight" | "paddle"} mode @param {number} t @returns {Array<[number, boolean]>}
    */
   setMode(mode, t) {
-    if (!MODES.has(mode)) throw new RangeError(`mode must be 'straight' or 'paddle', got ${mode}`);
+    if (!MODES.has(mode)) throw new RangeError(`mode must be 'straight', 'paddle' or 'bug', got ${mode}`);
     const out = this.releaseAll(t);
     this.mode = mode;
     return out;
+  }
+
+  /** Iambic 'A' or 'B' for paddle mode; applies from the next decision. @param {"A" | "B"} iambic */
+  setIambic(iambic) {
+    if (!IAMBIC.has(iambic)) throw new RangeError(`iambic must be 'A' or 'B', got ${iambic}`);
+    this.iambic = iambic;
+  }
+
+  /**
+   * Dah length in dits and weight in percent; null keeps a value. Next element on.
+   * @param {number | null} [dahRatio] @param {number | null} [weight]
+   */
+  setWeighting(dahRatio = null, weight = null) {
+    if (dahRatio !== null && dahRatio !== undefined) {
+      const r = Number(dahRatio);
+      if (!(Number.isFinite(r) && r >= DAH_RATIO_RANGE[0] && r <= DAH_RATIO_RANGE[1])) {
+        throw new RangeError(`dahRatio must be within ${DAH_RATIO_RANGE}, got ${dahRatio}`);
+      }
+      this.dahRatio = r;
+    }
+    if (weight !== null && weight !== undefined) {
+      const w = Number(weight);
+      if (!(Number.isFinite(w) && w >= WEIGHT_RANGE[0] && w <= WEIGHT_RANGE[1])) {
+        throw new RangeError(`weight must be within ${WEIGHT_RANGE}, got ${weight}`);
+      }
+      this.weight = w;
+    }
+  }
+
+  /** Length of an automatic element: `w T` for a dit, `(ratio + w - 1) T` for a dah. @param {string} which */
+  markMs(which) {
+    const w = this.weight / 50;
+    return this.ditMs * (which === "dit" ? w : this.dahRatio + w - 1);
+  }
+
+  /** The space after an automatic element: `(2 - w) T`, so mark plus space stays constant. */
+  get gapMs() {
+    return this.ditMs * (2 - this.weight / 50);
   }
 
   /** Let go of every key and paddle at `t`: the tone stops at once. @param {number} t */
   releaseAll(t) {
     this._held = { dit: false, dah: false };
     this._memory.length = 0;
+    this._squeezed = false;
+    this._manual = false;
     // An element's OFF edge is logged the moment it starts; releasing earlier
     // must cut it short, so drop the edges that lie ahead of t.
-    while (this._log.length && this._log[this._log.length - 1][0] > t) {
-      this._log.pop();
-      this._count -= 1;
-    }
-    this._lastT = this._log.length ? this._log[this._log.length - 1][0] : -Infinity;
+    this._dropFutureEdges(t);
     const out = [];
     if (this.stateAt(t)) out.push(this._emit(t, false));
     this._phase = "idle";
     this._current = null;
     return out;
+  }
+
+  _dropFutureEdges(t) {
+    while (this._log.length && this._log[this._log.length - 1][0] > t) {
+      this._log.pop();
+      this._count -= 1;
+    }
+    this._lastT = this._log.length ? this._log[this._log.length - 1][0] : -Infinity;
   }
 
   // ------------------------------------------------------------ straight key
@@ -108,22 +179,59 @@ export class Keyer {
 
   // ----------------------------------------------------------------- paddles
 
-  /** @param {"dit" | "dah"} which @param {number} t @returns {Array<[number, boolean]>} */
+  /**
+   * Paddle pressed: start an element now if idle, else remember it (ignored in
+   * straight mode). In bug mode the dah paddle is a lever that keys the tone directly.
+   * @param {"dit" | "dah"} which @param {number} t @returns {Array<[number, boolean]>}
+   */
   paddleDown(which, t) {
     if (!PADDLES.has(which)) throw new RangeError(`which must be 'dit' or 'dah', got ${which}`);
-    if (this.mode !== "paddle") return [];
+    if (this.mode === "straight") return [];
+    if (this.mode === "bug" && which === "dah") return this._bugDown(t);
     this._held[which] = true;
+    if (this._manual) return []; // bug: the dah lever holds the tone; dits resume when it is let go
     if (this._phase === "idle") return this._startElement(which, t);
-    if (which !== this._current && !this._memory.includes(which)) this._memory.push(which);
+    if (this._held.dit && this._held.dah) this._squeezed = true;
+    if (this.mode === "paddle" && which !== this._current && !this._memory.includes(which)) this._memory.push(which);
     return [];
   }
 
-  /** @param {"dit" | "dah"} which @param {number} t @returns {Array<[number, boolean]>} */
+  /**
+   * Paddle released; the element in progress completes on its own (a bug's dah lever stops the tone).
+   * @param {"dit" | "dah"} which @param {number} t @returns {Array<[number, boolean]>}
+   */
   paddleUp(which, t) {
     if (!PADDLES.has(which)) throw new RangeError(`which must be 'dit' or 'dah', got ${which}`);
-    void t;
+    if (this.mode === "bug" && which === "dah") return this._bugUp(t);
     this._held[which] = false;
     return [];
+  }
+
+  /** Bug dah lever pressed: tone on now; a dit in progress is cut short (its OFF edge dropped). */
+  _bugDown(t) {
+    if (this._manual) return [];
+    this._manual = true;
+    this._memory.length = 0;
+    this._dropFutureEdges(t);
+    this._phase = "manual";
+    this._current = null;
+    if (this.stateAt(t)) return [];
+    return [this._emit(t, true)];
+  }
+
+  /** Bug dah lever released: tone off; dits resume one space later if the dit paddle is held. */
+  _bugUp(t) {
+    if (!this._manual) return [];
+    this._manual = false;
+    const out = [];
+    if (this.stateAt(t)) out.push(this._emit(t, false));
+    if (this._held.dit) {
+      this._phase = "gap";
+      this._gapEnd = t + this.gapMs;
+    } else {
+      this._phase = "idle";
+    }
+    return out;
   }
 
   /**
@@ -133,7 +241,7 @@ export class Keyer {
    */
   tick(t) {
     const out = [];
-    if (this.mode !== "paddle") return out;
+    if (this.mode === "straight" || this._manual) return out;
     for (let i = 0; i < MAX_ELEMENTS_PER_TICK; i++) {
       if (this._phase === "mark" && t >= this._elementEnd) this._phase = "gap";
       if (this._phase === "gap" && t >= this._gapEnd) {
@@ -153,7 +261,7 @@ export class Keyer {
 
   /** When `tick` next has a decision to make; `null` while idle or in straight mode. @returns {number | null} */
   get nextWakeupMs() {
-    if (this.mode !== "paddle") return null;
+    if (this.mode === "straight" || this._manual) return null;
     if (this._phase === "mark") return this._elementEnd;
     if (this._phase === "gap") return this._gapEnd;
     return null;
@@ -199,11 +307,11 @@ export class Keyer {
   }
 
   _startElement(which, t) {
-    const length = which === "dit" ? this.ditMs : 3 * this.ditMs;
     this._current = which;
     this._phase = "mark";
-    this._elementEnd = t + length;
-    this._gapEnd = this._elementEnd + this.ditMs;
+    this._elementEnd = t + this.markMs(which);
+    this._gapEnd = this._elementEnd + this.gapMs;
+    this._squeezed = this._held.dit && this._held.dah;
     const i = this._memory.indexOf(which);
     if (i >= 0) this._memory.splice(i, 1);
     return [this._emit(t, true), this._emit(this._elementEnd, false)];
@@ -212,9 +320,14 @@ export class Keyer {
   _nextElement() {
     if (this._memory.length) return this._memory.shift();
     const { dit, dah } = this._held;
+    if (this.mode === "bug") return dit ? "dit" : null;
     if (dit && dah) return this._current === "dit" ? "dah" : "dit";
     if (dit) return "dit";
     if (dah) return "dah";
+    if (this.iambic === "B" && this._squeezed && this._current !== null) {
+      this._squeezed = false; // the one extra element of mode B, then silence
+      return this._current === "dit" ? "dah" : "dit";
+    }
     return null;
   }
 }
@@ -369,6 +482,16 @@ export class LiveKey {
   /** @param {number} ditMs */
   setSpeed(ditMs) {
     this.keyer.setSpeed(ditMs);
+  }
+
+  /** @param {"A" | "B"} iambic */
+  setIambic(iambic) {
+    this.keyer.setIambic(iambic);
+  }
+
+  /** @param {number | null} [dahRatio] @param {number | null} [weight] */
+  setWeighting(dahRatio = null, weight = null) {
+    this.keyer.setWeighting(dahRatio, weight);
   }
 
   /** Retune the decoder feed (and the speakers when no sidetone is set). @param {number} f0 */

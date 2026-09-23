@@ -156,6 +156,147 @@ test("validation", () => {
   assert.throws(() => new Keyer(0), RangeError);
   assert.throws(() => new Keyer(T, "iambic"), RangeError);
   assert.throws(() => new Keyer(T, "paddle").paddleDown("squeeze", 0), RangeError);
+  assert.throws(() => new Keyer(T, "straight", { iambic: "C" }), RangeError);
+  assert.throws(() => new Keyer(T, "straight", { dahRatio: 1.5 }), RangeError);
+  assert.throws(() => new Keyer(T, "straight", { weight: 80 }), RangeError);
+  const k = new Keyer(T);
+  assert.throws(() => k.setIambic("ab"), RangeError);
+  assert.throws(() => k.setWeighting(null, NaN), RangeError);
+  k.setWeighting();
+  assert.deepEqual([k.dahRatio, k.weight], [3, 50]);
+});
+
+// ---------------------------------------------------------- iambic A and B
+
+function squeezeReleaseDuringDah(iambic) {
+  const k = new Keyer(T, "paddle", { iambic });
+  const trans = k.paddleDown("dit", 0);
+  trans.push(...k.paddleDown("dah", 30)); // squeezed during the dit: dah remembered
+  trans.push(...k.tick(2 * T)); // gap over: the dah starts at 2T and ends at 5T
+  k.paddleUp("dit", 3 * T);
+  k.paddleUp("dah", 3.5 * T); // both released during the dah
+  for (let i = 0; i < 4; i++) {
+    const w = k.nextWakeupMs;
+    if (w === null) break;
+    trans.push(...k.tick(w));
+  }
+  return trans;
+}
+
+test("iambic A ends with the element in progress", () => {
+  const trans = squeezeReleaseDuringDah("A");
+  assert.deepEqual(trans, [[0, true], [T, false], [2 * T, true], [5 * T, false]]);
+  assert.equal(decode(trans, 12 * T), "A");
+});
+
+test("iambic B adds one opposite element after a squeeze", () => {
+  const trans = squeezeReleaseDuringDah("B");
+  assert.deepEqual(trans, [[0, true], [T, false], [2 * T, true], [5 * T, false], [6 * T, true], [7 * T, false]]);
+  assert.equal(decode(trans, 12 * T), "R");
+});
+
+test("iambic B: a squeeze released during the first element gives a plain A", () => {
+  const k = new Keyer(T, "paddle", { iambic: "B" });
+  const trans = k.paddleDown("dit", 0);
+  k.paddleDown("dah", 20);
+  k.paddleUp("dit", 40);
+  k.paddleUp("dah", 50);
+  while (k.nextWakeupMs !== null) trans.push(...k.tick(k.nextWakeupMs));
+  assert.deepEqual(trans, [[0, true], [T, false], [2 * T, true], [5 * T, false]]);
+});
+
+test("iambic B without a squeeze behaves like A", () => {
+  const k = new Keyer(T, "paddle", { iambic: "B" });
+  const trans = k.paddleDown("dah", 0);
+  k.paddleUp("dah", 50);
+  while (k.nextWakeupMs !== null) trans.push(...k.tick(k.nextWakeupMs));
+  assert.deepEqual(trans, [[0, true], [3 * T, false]]);
+  k.setIambic("A");
+  assert.equal(k.iambic, "A");
+});
+
+// ----------------------------------------------------------------- bug mode
+
+test("bug: dits are automatic and dahs by hand", () => {
+  const k = new Keyer(T, "bug");
+  assert.deepEqual(k.keyDown(0), []);
+  const trans = k.paddleDown("dit", 0);
+  while (trans.length < 4) trans.push(...k.tick(k.nextWakeupMs));
+  assert.deepEqual(trans, [[0, true], [T, false], [2 * T, true], [3 * T, false]]);
+  k.paddleUp("dit", 2.5 * T);
+  assert.deepEqual(k.tick(4 * T), []);
+  assert.equal(k.nextWakeupMs, null);
+  assert.deepEqual(k.paddleDown("dah", 5 * T), [[5 * T, true]]);
+  assert.equal(k.nextWakeupMs, null);
+  assert.deepEqual(k.tick(6 * T), []);
+  assert.deepEqual(k.paddleDown("dah", 6 * T), []);
+  assert.deepEqual(k.paddleUp("dah", 8.7 * T), [[8.7 * T, false]]);
+  assert.deepEqual(k.paddleUp("dah", 9 * T), []);
+  assert.equal(k.stateAt(7 * T), true);
+  assert.equal(k.stateAt(9 * T), false);
+});
+
+test("bug: the lever cuts a dit short and dits resume after it", () => {
+  const k = new Keyer(T, "bug");
+  const trans = k.paddleDown("dit", 0);
+  trans.push(...k.paddleDown("dah", 0.5 * T));
+  assert.deepEqual(trans, [[0, true], [T, false]]); // what the calls returned; the log dropped the OFF edge
+  assert.deepEqual(k.transitionsSince(0).items, [[0, true]]);
+  assert.deepEqual(k.paddleDown("dit", 1.5 * T), []);
+  trans.push(...k.paddleUp("dah", 3 * T));
+  assert.deepEqual(trans.at(-1), [3 * T, false]);
+  assert.equal(k.nextWakeupMs, 4 * T);
+  trans.push(...k.tick(4 * T));
+  assert.deepEqual(trans.slice(-2), [[4 * T, true], [5 * T, false]]);
+  k.paddleUp("dit", 4.5 * T);
+  assert.deepEqual(k.releaseAll(4.6 * T), [[4.6 * T, false]]);
+  assert.deepEqual(k.tick(10 * T), []);
+});
+
+test("bug: memory is not used", () => {
+  const k = new Keyer(T, "bug");
+  k.paddleDown("dit", 0);
+  k.paddleDown("dah", 0.3 * T);
+  k.paddleUp("dit", 0.4 * T);
+  assert.deepEqual(k.paddleUp("dah", 2 * T), [[2 * T, false]]);
+  assert.equal(k.nextWakeupMs, null);
+});
+
+// ---------------------------------------------------------------- weighting
+
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`);
+
+test("weighting shapes marks and spaces but keeps the period", () => {
+  const k = new Keyer(T, "paddle", { dahRatio: 4, weight: 60 });
+  near(k.markMs("dit"), 1.2 * T);
+  near(k.markMs("dah"), 4.2 * T);
+  near(k.gapMs, 0.8 * T);
+  let trans = k.paddleDown("dit", 0);
+  while (trans.length < 4) trans.push(...k.tick(k.nextWakeupMs));
+  const expect1 = [[0, true], [1.2 * T, false], [2 * T, true], [3.2 * T, false]];
+  trans.forEach(([t, on], i) => {
+    near(t, expect1[i][0]);
+    assert.equal(on, expect1[i][1]);
+  });
+  k.releaseAll(3.5 * T);
+  k.setWeighting(null, 40);
+  trans = k.paddleDown("dah", 10 * T);
+  while (trans.length < 4) trans.push(...k.tick(k.nextWakeupMs));
+  const expect2 = [[10 * T, true], [13.8 * T, false], [15 * T, true], [18.8 * T, false]];
+  trans.forEach(([t, on], i) => {
+    near(t, expect2[i][0]);
+    assert.equal(on, expect2[i][1]);
+  });
+  k.setWeighting(3, 50);
+  assert.deepEqual([k.markMs("dit"), k.markMs("dah"), k.gapMs], [T, 3 * T, T]);
+});
+
+test("LiveKey passes keyer variants through", () => {
+  const keyer = new Keyer(T, "paddle");
+  const lk = new LiveKey(keyer);
+  lk.setIambic("B");
+  lk.setWeighting(3.5, 55);
+  assert.deepEqual([keyer.iambic, keyer.dahRatio, keyer.weight], ["B", 3.5, 55]);
 });
 
 // ----------------------------------------------------------------- LiveKey

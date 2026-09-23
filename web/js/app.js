@@ -90,7 +90,8 @@ const el = {
   pill: $("statePill"), lvl: $("lvlV"), snr: $("snrV"), wpm: $("wpmV"), cnt: $("cntV"), unk: $("unkV"),
   encIn: $("encIn"), encWpm: $("encWpm"), encFarns: $("encFarns"), encPlay: $("encPlay"), encCopy: $("encCopy"), encOut: $("encOut"),
   encFeed: $("encFeed"),
-  keyStraight: $("keyStraight"), keyPaddle: $("keyPaddle"), keyPill: $("keyPill"), keyHelp: $("keyHelp"),
+  keyStraight: $("keyStraight"), keyPaddle: $("keyPaddle"), keyBug: $("keyBug"), keyPill: $("keyPill"), keyHelp: $("keyHelp"),
+  iambicA: $("iambicA"), iambicB: $("iambicB"), keyRatio: $("keyRatio"), keyWeight: $("keyWeight"),
   keypadStraight: $("keypadStraight"), keypadPaddle: $("keypadPaddle"),
   keyBtn: $("keyBtn"), ditBtn: $("ditBtn"), dahBtn: $("dahBtn"),
   keyRebind: $("keyRebind"), ditRebind: $("ditRebind"), dahRebind: $("dahRebind"), keyReset: $("keyReset"),
@@ -1221,6 +1222,9 @@ const sent = { dec: new MorseDecoder(), index: 0, lastT: null, lastOn: false, /*
 /** Which keyboard key works the straight key and each paddle; kept in this browser. */
 const STORE_BINDINGS = "morse.key.bindings";
 const STORE_SIDETONE = "morse.key.sidetone";
+const STORE_IAMBIC = "morse.key.iambic";
+const STORE_RATIO = "morse.key.ratio";
+const STORE_WEIGHT = "morse.key.weight";
 const DEFAULT_SIDETONE_HZ = 600;
 let bindings = loadBindings();
 /** The action whose key is being chosen after Change key, else null. @type {"key" | "dit" | "dah" | null} */
@@ -1244,9 +1248,33 @@ function saveBindings() {
 
 function keyHelpText(mode) {
   const b = (a) => `<b>${escapeHtml(keyLabel(bindings[a]))}</b>`;
-  return mode === "paddle"
-    ? `${b("dit")} sends dits and ${b("dah")} sends dahs at the encoder speed; hold to repeat, hold both to alternate.`
-    : `Hold ${b("key")} or the button: the tone sounds while it is held.`;
+  if (mode === "paddle") return `${b("dit")} sends dits and ${b("dah")} sends dahs at the encoder speed; hold to repeat, hold both to alternate.`;
+  if (mode === "bug") return `${b("dit")} sends dits while held; ${b("dah")} keys the tone by hand, like a bug's dah lever.`;
+  return `Hold ${b("key")} or the button: the tone sounds while it is held.`;
+}
+
+/** Iambic A or B for the two-key keyer; kept in this browser. */
+function setIambic(which, persist = true) {
+  liveKey.setIambic(which);
+  el.iambicA.setAttribute("aria-pressed", String(which === "A"));
+  el.iambicB.setAttribute("aria-pressed", String(which === "B"));
+  if (persist) store.set(STORE_IAMBIC, which);
+}
+
+/** Dah ratio and weight from their fields (out-of-range values fall back to the standard 3 and 50). */
+function applyWeighting(persist = true) {
+  let ratio = parseFloat(el.keyRatio.value);
+  if (!(Number.isFinite(ratio) && ratio >= 2 && ratio <= 5)) ratio = 3;
+  ratio = Math.round(ratio * 10) / 10;
+  let weight = parseFloat(el.keyWeight.value);
+  if (!(Number.isFinite(weight) && weight >= 25 && weight <= 75)) weight = 50;
+  weight = Math.round(weight);
+  liveKey.setWeighting(ratio, weight);
+  if (persist) {
+    store.set(STORE_RATIO, String(ratio));
+    store.set(STORE_WEIGHT, String(weight));
+  }
+  updateKeyReadouts();
 }
 
 /** Button captions, help line and Reset state after a binding change. */
@@ -1314,11 +1342,14 @@ function ensureLiveKey() {
 
 function setKeyMode(mode) {
   liveKey.setMode(mode);
-  const paddle = mode === "paddle";
-  el.keyStraight.setAttribute("aria-pressed", String(!paddle));
-  el.keyPaddle.setAttribute("aria-pressed", String(paddle));
-  el.keypadStraight.hidden = paddle;
-  el.keypadPaddle.hidden = !paddle;
+  const paddles = mode === "paddle" || mode === "bug";
+  el.keyStraight.setAttribute("aria-pressed", String(mode === "straight"));
+  el.keyPaddle.setAttribute("aria-pressed", String(mode === "paddle"));
+  el.keyBug.setAttribute("aria-pressed", String(mode === "bug"));
+  el.keypadStraight.hidden = paddles;
+  el.keypadPaddle.hidden = !paddles;
+  el.iambicA.disabled = mode !== "paddle";
+  el.iambicB.disabled = mode !== "paddle";
   capture = null;
   renderBindings();
   for (const b of [el.keyBtn, el.ditBtn, el.dahBtn]) b.classList.remove("down");
@@ -1326,9 +1357,8 @@ function setKeyMode(mode) {
 }
 
 function updateKeyReadouts() {
-  const T = 1200 / encoder.wpm;
   el.keySpeed.innerHTML = `${encoder.wpm}<small>WPM</small>`;
-  el.keyDit.textContent = `${Math.round(T)} · ${Math.round(3 * T)} ms`;
+  el.keyDit.textContent = `${Math.round(keyer.markMs("dit"))} · ${Math.round(keyer.markMs("dah"))} ms`;
 }
 
 function isTypingTarget(target) {
@@ -1362,8 +1392,7 @@ function onKeyboard(e, down) {
   }
   const action = actionFor(bindings, e.code);
   if (!action) return;
-  const mode = action === "key" ? "straight" : "paddle";
-  if (keyer.mode !== mode) return;
+  if (action === "key" ? keyer.mode !== "straight" : keyer.mode === "straight") return;
   e.preventDefault();
   if (down && e.repeat) return;
   if (down && !ensureLiveKey()) return;
@@ -1667,6 +1696,19 @@ function wire() {
 
   el.keyStraight.addEventListener("click", () => setKeyMode("straight"));
   el.keyPaddle.addEventListener("click", () => setKeyMode("paddle"));
+  el.keyBug.addEventListener("click", () => setKeyMode("bug"));
+  el.iambicA.addEventListener("click", () => setIambic("A"));
+  el.iambicB.addEventListener("click", () => setIambic("B"));
+  setIambic(store.get(STORE_IAMBIC) === "B" ? "B" : "A", false);
+  const storedRatio = store.get(STORE_RATIO);
+  if (storedRatio !== null) el.keyRatio.value = storedRatio;
+  const storedWeight = store.get(STORE_WEIGHT);
+  if (storedWeight !== null) el.keyWeight.value = storedWeight;
+  applyWeighting(false);
+  el.keyRatio.addEventListener("input", () => applyWeighting(true));
+  el.keyWeight.addEventListener("input", () => applyWeighting(true));
+  el.iambicA.disabled = keyer.mode !== "paddle";
+  el.iambicB.disabled = keyer.mode !== "paddle";
   bindKeyButton(el.keyBtn, () => liveKey.keyDown(), () => liveKey.keyUp());
   bindKeyButton(el.ditBtn, () => liveKey.paddleDown("dit"), () => liveKey.paddleUp("dit"));
   bindKeyButton(el.dahBtn, () => liveKey.paddleDown("dah"), () => liveKey.paddleUp("dah"));

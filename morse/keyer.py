@@ -17,7 +17,23 @@ Two pieces, kept apart so the timing logic can be tested without audio:
       while it is held; the dah paddle likewise with dahs.  Holding both
       alternates (iambic).  A paddle tapped during an element is remembered
       and sent after it, as real keyers do, so a quick "dit, dah" gives a
-      clean A.  Releasing during an element never cuts it short.
+      clean A.  Releasing during an element never cuts it short.  Iambic
+      ``A`` (default): letting go of both paddles ends the character with the
+      element in progress.  Iambic ``B``: when both paddles were squeezed
+      during an element and both are released, one more element of the
+      opposite kind follows (the Curtis mode B habit: a squeeze released
+      during the dah of an A gives an R).
+    * ``bug`` mode: a semi-automatic key.  The dit paddle sends automatic
+      dits while held; the dah paddle is a straight key, the tone sounding
+      while it is held, so the operator makes every dah by hand.  Pressing
+      the dah lever cuts a dit short; dits resume one space after it is let
+      go if the dit paddle is still held.
+    * Weighting applies to paddle and bug elements: ``dah_ratio`` is the dah
+      length in dits (3 standard) and ``weight`` in percent (50 standard)
+      lengthens every mark and shortens the space after it by the same
+      amount, so the element period is unchanged: mark ``w T`` (dit) or
+      ``(ratio + w - 1) T`` (dah) and space ``(2 - w) T`` with ``w =
+      weight / 50``.
 
 :class:`LiveKey`
     Plays the keyer's tone through a ``sounddevice`` output stream in real
@@ -38,13 +54,19 @@ from typing import Any, Literal
 
 import numpy as np
 
-__all__ = ["Keyer", "LiveKey", "Mode", "Paddle", "envelope"]
+__all__ = ["DAH_RATIO_RANGE", "Iambic", "Keyer", "LiveKey", "Mode", "Paddle", "WEIGHT_RANGE", "envelope"]
 
-Mode = Literal["straight", "paddle"]
+Mode = Literal["straight", "paddle", "bug"]
 Paddle = Literal["dit", "dah"]
+Iambic = Literal["A", "B"]
 
-_MODES = ("straight", "paddle")
+_MODES = ("straight", "paddle", "bug")
 _PADDLES = ("dit", "dah")
+_IAMBIC = ("A", "B")
+DAH_RATIO_RANGE = (2.0, 5.0)
+"""Allowed dah length in dits (3 is standard)."""
+WEIGHT_RANGE = (25.0, 75.0)
+"""Allowed weight in percent (50 is standard: mark and following space as the book says)."""
 _LOG_MAX = 4000
 """Transitions kept in the log; 4000 is minutes of keying at any speed."""
 _MAX_ELEMENTS_PER_TICK = 64
@@ -62,17 +84,26 @@ class Keyer:
     :meth:`transitions_since`.
     """
 
-    def __init__(self, dit_ms: float = 150.0, mode: Mode = "straight") -> None:
+    def __init__(self, dit_ms: float = 150.0, mode: Mode = "straight", iambic: Iambic = "A",
+                 dah_ratio: float = 3.0, weight: float = 50.0) -> None:
         if not dit_ms > 0:
             raise ValueError(f"dit_ms must be positive, got {dit_ms!r}")
         if mode not in _MODES:
-            raise ValueError(f"mode must be 'straight' or 'paddle', got {mode!r}")
+            raise ValueError(f"mode must be 'straight', 'paddle' or 'bug', got {mode!r}")
+        if iambic not in _IAMBIC:
+            raise ValueError(f"iambic must be 'A' or 'B', got {iambic!r}")
         self.dit_ms: float = float(dit_ms)
         self.mode: Mode = mode
+        self.iambic: Iambic = iambic
+        self.dah_ratio: float = 3.0
+        self.weight: float = 50.0
+        self.set_weighting(dah_ratio, weight)
         self._held: dict[str, bool] = {"dit": False, "dah": False}
         self._memory: list[str] = []
-        self._phase: str = "idle"  # straight mode: 'idle' or 'mark'; paddle: 'idle', 'mark', 'gap'
+        self._phase: str = "idle"  # straight: 'idle' or 'mark'; paddle: 'idle', 'mark', 'gap'; bug adds 'manual'
         self._current: str | None = None
+        self._squeezed: bool = False  # both paddles held at some moment during the current element
+        self._manual: bool = False  # bug mode: the dah lever is holding the tone
         self._element_end: float = 0.0
         self._gap_end: float = 0.0
         self._log: deque[Transition] = deque(maxlen=_LOG_MAX)
@@ -90,27 +121,61 @@ class Keyer:
     def set_mode(self, mode: Mode, t: float) -> list[Transition]:
         """Switch mode at time ``t``; releases everything and ends a sounding tone."""
         if mode not in _MODES:
-            raise ValueError(f"mode must be 'straight' or 'paddle', got {mode!r}")
+            raise ValueError(f"mode must be 'straight', 'paddle' or 'bug', got {mode!r}")
         out = self.release_all(t)
         self.mode = mode
         return out
+
+    def set_iambic(self, iambic: Iambic) -> None:
+        """Choose iambic ``'A'`` or ``'B'`` for paddle mode; applies from the next decision."""
+        if iambic not in _IAMBIC:
+            raise ValueError(f"iambic must be 'A' or 'B', got {iambic!r}")
+        self.iambic = iambic
+
+    def set_weighting(self, dah_ratio: float | None = None, weight: float | None = None) -> None:
+        """Set the dah length in dits and the weight in percent; None keeps a value. Next element on."""
+        if dah_ratio is not None:
+            r = float(dah_ratio)
+            if not (math.isfinite(r) and DAH_RATIO_RANGE[0] <= r <= DAH_RATIO_RANGE[1]):
+                raise ValueError(f"dah_ratio must be within {DAH_RATIO_RANGE}, got {dah_ratio!r}")
+            self.dah_ratio = r
+        if weight is not None:
+            w = float(weight)
+            if not (math.isfinite(w) and WEIGHT_RANGE[0] <= w <= WEIGHT_RANGE[1]):
+                raise ValueError(f"weight must be within {WEIGHT_RANGE}, got {weight!r}")
+            self.weight = w
+
+    def mark_ms(self, which: str) -> float:
+        """Length of an automatic element: ``w T`` for a dit, ``(ratio + w - 1) T`` for a dah."""
+        w = self.weight / 50.0
+        return self.dit_ms * (w if which == "dit" else self.dah_ratio + w - 1.0)
+
+    @property
+    def gap_ms(self) -> float:
+        """The space after an automatic element: ``(2 - w) T``, so mark plus space stays constant."""
+        return self.dit_ms * (2.0 - self.weight / 50.0)
 
     def release_all(self, t: float) -> list[Transition]:
         """Let go of every key and paddle at ``t``: the tone stops at once, memory is cleared."""
         self._held = {"dit": False, "dah": False}
         self._memory.clear()
+        self._squeezed = False
+        self._manual = False
         # An element's OFF edge is logged the moment it starts; releasing
         # earlier must cut it short, so drop the edges that lie ahead of t.
-        while self._log and self._log[-1][0] > t:
-            self._log.pop()
-            self._count -= 1
-        self._last_t = self._log[-1][0] if self._log else -math.inf
+        self._drop_future_edges(t)
         out: list[Transition] = []
         if self.state_at(t):
             out.append(self._emit(t, False))
         self._phase = "idle"
         self._current = None
         return out
+
+    def _drop_future_edges(self, t: float) -> None:
+        while self._log and self._log[-1][0] > t:
+            self._log.pop()
+            self._count -= 1
+        self._last_t = self._log[-1][0] if self._log else -math.inf
 
     # --------------------------------------------------------- straight key
 
@@ -131,24 +196,63 @@ class Keyer:
     # -------------------------------------------------------------- paddles
 
     def paddle_down(self, which: Paddle, t: float) -> list[Transition]:
-        """Paddle pressed: start an element now if idle, else remember it (ignored in straight mode)."""
+        """Paddle pressed: start an element now if idle, else remember it (ignored in straight mode).
+
+        In bug mode the dah paddle is a lever that keys the tone directly.
+        """
         if which not in _PADDLES:
             raise ValueError(f"which must be 'dit' or 'dah', got {which!r}")
-        if self.mode != "paddle":
+        if self.mode == "straight":
             return []
+        if self.mode == "bug" and which == "dah":
+            return self._bug_down(t)
         self._held[which] = True
+        if self._manual:
+            return []  # bug: the dah lever holds the tone; dits resume when it is let go
         if self._phase == "idle":
             return self._start_element(which, t)
-        if which != self._current and which not in self._memory:
+        if self._held["dit"] and self._held["dah"]:
+            self._squeezed = True
+        if self.mode == "paddle" and which != self._current and which not in self._memory:
             self._memory.append(which)
         return []
 
     def paddle_up(self, which: Paddle, t: float) -> list[Transition]:
-        """Paddle released; the element in progress completes on its own."""
+        """Paddle released; the element in progress completes on its own (a bug's dah lever stops the tone)."""
         if which not in _PADDLES:
             raise ValueError(f"which must be 'dit' or 'dah', got {which!r}")
+        if self.mode == "bug" and which == "dah":
+            return self._bug_up(t)
         self._held[which] = False
         return []
+
+    def _bug_down(self, t: float) -> list[Transition]:
+        """Bug dah lever pressed: tone on now; a dit in progress is cut short (its OFF edge dropped)."""
+        if self._manual:
+            return []
+        self._manual = True
+        self._memory.clear()
+        self._drop_future_edges(t)
+        self._phase = "manual"
+        self._current = None
+        if self.state_at(t):
+            return []
+        return [self._emit(t, True)]
+
+    def _bug_up(self, t: float) -> list[Transition]:
+        """Bug dah lever released: tone off; dits resume one space later if the dit paddle is held."""
+        if not self._manual:
+            return []
+        self._manual = False
+        out: list[Transition] = []
+        if self.state_at(t):
+            out.append(self._emit(t, False))
+        if self._held["dit"]:
+            self._phase = "gap"
+            self._gap_end = t + self.gap_ms
+        else:
+            self._phase = "idle"
+        return out
 
     def tick(self, t: float) -> list[Transition]:
         """Advance the paddle keyer to time ``t``; returns the transitions of any new elements.
@@ -157,7 +261,7 @@ class Keyer:
         and while idle it does nothing.
         """
         out: list[Transition] = []
-        if self.mode != "paddle":
+        if self.mode == "straight" or self._manual:
             return out
         for _ in range(_MAX_ELEMENTS_PER_TICK):
             if self._phase == "mark" and t >= self._element_end:
@@ -176,7 +280,7 @@ class Keyer:
     @property
     def next_wakeup_ms(self) -> float | None:
         """When :meth:`tick` next has a decision to make, or ``None`` while idle or in straight mode."""
-        if self.mode != "paddle":
+        if self.mode == "straight" or self._manual:
             return None
         if self._phase == "mark":
             return self._element_end
@@ -222,11 +326,11 @@ class Keyer:
         return tr
 
     def _start_element(self, which: str, t: float) -> list[Transition]:
-        length = self.dit_ms if which == "dit" else 3.0 * self.dit_ms
         self._current = which
         self._phase = "mark"
-        self._element_end = t + length
-        self._gap_end = self._element_end + self.dit_ms
+        self._element_end = t + self.mark_ms(which)
+        self._gap_end = self._element_end + self.gap_ms
+        self._squeezed = self._held["dit"] and self._held["dah"]
         if which in self._memory:
             self._memory.remove(which)
         return [self._emit(t, True), self._emit(self._element_end, False)]
@@ -235,16 +339,22 @@ class Keyer:
         if self._memory:
             return self._memory.pop(0)
         dit, dah = self._held["dit"], self._held["dah"]
+        if self.mode == "bug":
+            return "dit" if dit else None
         if dit and dah:
             return "dah" if self._current == "dit" else "dit"
         if dit:
             return "dit"
         if dah:
             return "dah"
+        if self.iambic == "B" and self._squeezed and self._current is not None:
+            self._squeezed = False  # the one extra element of mode B, then silence
+            return "dah" if self._current == "dit" else "dit"
         return None
 
     def __repr__(self) -> str:
-        return (f"Keyer(mode={self.mode!r}, dit_ms={self.dit_ms:.0f}, phase={self._phase!r}, "
+        return (f"Keyer(mode={self.mode!r}, iambic={self.iambic!r}, dit_ms={self.dit_ms:.0f}, "
+                f"dah_ratio={self.dah_ratio:g}, weight={self.weight:g}, phase={self._phase!r}, "
                 f"held={self._held}, memory={self._memory})")
 
 
@@ -399,6 +509,14 @@ class LiveKey:
     def set_speed(self, dit_ms: float) -> None:
         with self._lock:
             self.keyer.set_speed(dit_ms)
+
+    def set_iambic(self, iambic: Iambic) -> None:
+        with self._lock:
+            self.keyer.set_iambic(iambic)
+
+    def set_weighting(self, dah_ratio: float | None = None, weight: float | None = None) -> None:
+        with self._lock:
+            self.keyer.set_weighting(dah_ratio, weight)
 
     def set_frequency(self, f0: float) -> None:
         """Retune the decoder feed (and the speakers when no sidetone is set)."""

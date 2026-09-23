@@ -170,6 +170,154 @@ def test_validation():
         Keyer(T, "iambic")  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         Keyer(T, "paddle").paddle_down("squeeze", 0.0)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        Keyer(T, iambic="C")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        Keyer(T, dah_ratio=1.5)
+    with pytest.raises(ValueError):
+        Keyer(T, weight=80)
+    k = Keyer(T)
+    with pytest.raises(ValueError):
+        k.set_iambic("ab")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        k.set_weighting(weight=float("nan"))
+    k.set_weighting(dah_ratio=None, weight=None)  # keeps everything
+    assert (k.dah_ratio, k.weight) == (3.0, 50.0)
+
+
+# ---------------------------------------------------------- iambic A and B
+
+
+def _squeeze_release_during_dah(iambic: str) -> list[tuple[float, bool]]:
+    """Squeeze both paddles from idle (dit first) and let go of both during the dah."""
+    k = Keyer(T, "paddle", iambic=iambic)  # type: ignore[arg-type]
+    trans = k.paddle_down("dit", 0.0)
+    trans += k.paddle_down("dah", 30.0)  # squeezed during the dit: dah remembered
+    trans += k.tick(2 * T)  # gap over: the dah starts at 2T and ends at 5T
+    k.paddle_up("dit", 3 * T)
+    k.paddle_up("dah", 3.5 * T)  # both released during the dah
+    for _ in range(4):
+        w = k.next_wakeup_ms
+        if w is None:
+            break
+        trans += k.tick(w)
+    return trans
+
+
+def test_iambic_a_ends_with_the_element_in_progress():
+    trans = _squeeze_release_during_dah("A")
+    assert trans == [(0.0, True), (T, False), (2 * T, True), (5 * T, False)]
+    assert decode(trans, 12 * T) == "A"
+
+
+def test_iambic_b_adds_one_opposite_element_after_a_squeeze():
+    trans = _squeeze_release_during_dah("B")
+    assert trans == [(0.0, True), (T, False), (2 * T, True), (5 * T, False), (6 * T, True), (7 * T, False)]
+    assert decode(trans, 12 * T) == "R"
+
+
+def test_iambic_b_squeeze_released_during_the_first_element_gives_a_plain_a():
+    k = Keyer(T, "paddle", iambic="B")
+    trans = k.paddle_down("dit", 0.0)
+    k.paddle_down("dah", 20.0)
+    k.paddle_up("dit", 40.0)
+    k.paddle_up("dah", 50.0)  # both let go while the dit still sounds
+    while k.next_wakeup_ms is not None:
+        trans += k.tick(k.next_wakeup_ms)
+    assert trans == [(0.0, True), (T, False), (2 * T, True), (5 * T, False)]  # the remembered dah, no extra
+
+
+def test_iambic_b_without_a_squeeze_behaves_like_a():
+    k = Keyer(T, "paddle", iambic="B")
+    trans = k.paddle_down("dah", 0.0)
+    k.paddle_up("dah", 50.0)
+    while k.next_wakeup_ms is not None:
+        trans += k.tick(k.next_wakeup_ms)
+    assert trans == [(0.0, True), (3 * T, False)]
+    k.set_iambic("A")
+    assert k.iambic == "A"
+
+
+# ----------------------------------------------------------------- bug mode
+
+
+def test_bug_dits_are_automatic_and_dahs_by_hand():
+    k = Keyer(T, "bug")
+    assert k.key_down(0.0) == []  # no straight key in bug mode
+    trans = k.paddle_down("dit", 0.0)
+    while len(trans) < 4:
+        trans += k.tick(k.next_wakeup_ms)
+    assert trans == [(0.0, True), (T, False), (2 * T, True), (3 * T, False)]
+    k.paddle_up("dit", 2.5 * T)
+    assert k.tick(4 * T) == [] and k.next_wakeup_ms is None
+    # The dah lever is a straight key: on while held, any length.
+    assert k.paddle_down("dah", 5 * T) == [(5 * T, True)]
+    assert k.next_wakeup_ms is None and k.tick(6 * T) == []
+    assert k.paddle_down("dah", 6 * T) == []  # already down
+    assert k.paddle_up("dah", 8.7 * T) == [(8.7 * T, False)]
+    assert k.paddle_up("dah", 9 * T) == []
+    assert k.state_at(7 * T) is True and k.state_at(9 * T) is False
+
+
+def test_bug_lever_cuts_a_dit_short_and_dits_resume_after_it():
+    k = Keyer(T, "bug")
+    trans = k.paddle_down("dit", 0.0)  # dit: ON at 0, OFF logged at T
+    trans += k.paddle_down("dah", 0.5 * T)  # lever pressed mid-dit: the tone simply stays on
+    assert trans == [(0.0, True), (T, False)]  # what the calls returned; the log below dropped the OFF edge
+    assert k.transitions_since(0)[0] == [(0.0, True)]
+    assert k.paddle_down("dit", 1.5 * T) == []  # dits wait while the lever is down (still held)
+    trans += k.paddle_up("dah", 3 * T)
+    assert trans[-1] == (3 * T, False)
+    assert k.next_wakeup_ms == 4 * T  # one space, then dits resume because the dit paddle is held
+    trans += k.tick(4 * T)
+    assert trans[-2:] == [(4 * T, True), (5 * T, False)]
+    k.paddle_up("dit", 4.5 * T)
+    assert k.release_all(4.6 * T) == [(4.6 * T, False)]
+    assert k.tick(10 * T) == []
+
+
+def test_bug_memory_is_not_used():
+    k = Keyer(T, "bug")
+    k.paddle_down("dit", 0.0)
+    k.paddle_down("dah", 0.3 * T)  # lever during a dit: manual tone
+    k.paddle_up("dit", 0.4 * T)
+    trans = k.paddle_up("dah", 2 * T)
+    assert trans == [(2 * T, False)]
+    assert k.next_wakeup_ms is None  # nothing remembered, nothing held
+
+
+# ---------------------------------------------------------------- weighting
+
+
+def test_weighting_shapes_marks_and_spaces_but_keeps_the_period():
+    k = Keyer(T, "paddle", dah_ratio=4.0, weight=60.0)
+    assert k.mark_ms("dit") == pytest.approx(1.2 * T)
+    assert k.mark_ms("dah") == pytest.approx(4.2 * T)
+    assert k.gap_ms == pytest.approx(0.8 * T)
+    trans = k.paddle_down("dit", 0.0)
+    while len(trans) < 4:
+        trans += k.tick(k.next_wakeup_ms)
+    assert trans == pytest.approx([(0.0, True), (1.2 * T, False), (2 * T, True), (3.2 * T, False)])
+    k.release_all(3.5 * T)
+    k.set_weighting(weight=40.0)  # lighter: shorter marks, longer spaces, same period
+    trans = k.paddle_down("dah", 10 * T)
+    while len(trans) < 4:
+        trans += k.tick(k.next_wakeup_ms)
+    assert trans == pytest.approx([(10 * T, True), (13.8 * T, False), (15 * T, True), (18.8 * T, False)])
+    k.set_weighting(3.0, 50.0)
+    assert (k.mark_ms("dit"), k.mark_ms("dah"), k.gap_ms) == (T, 3 * T, T)
+    assert "dah_ratio=3" in repr(k) and "iambic='A'" in repr(k)
+
+
+def test_livekey_passes_keyer_variants_through(monkeypatch):
+    monkeypatch.setitem(sys.modules, "sounddevice", None)
+    keyer = Keyer(T, "paddle")
+    lk = LiveKey(keyer, f0=1000.0)
+    lk.set_iambic("B")
+    lk.set_weighting(3.5, 55.0)
+    assert keyer.iambic == "B" and keyer.dah_ratio == 3.5 and keyer.weight == 55.0
+    lk.set_mode("bug")
+    assert keyer.mode == "bug"
 
 
 # ---------------------------------------------------------------- envelope

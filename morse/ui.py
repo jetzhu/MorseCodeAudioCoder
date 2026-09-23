@@ -56,7 +56,7 @@ from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
 from morse import bindings as keybind
 from morse import practice
-from morse.keyer import Keyer, LiveKey
+from morse.keyer import DAH_RATIO_RANGE, WEIGHT_RANGE, Keyer, LiveKey
 from morse.runs import Run
 from morse.player import TonePlayer, build_timing, farnsworth_gaps, render_tone
 
@@ -818,6 +818,12 @@ SETTINGS_BINDINGS = "key/bindings"
 """QSettings key: the hand key's bindings as a JSON object (see :mod:`morse.bindings`)."""
 SETTINGS_SIDETONE = "key/sidetone_hz"
 """QSettings key: sidetone pitch in Hz; 0 follows the beeper frequency."""
+SETTINGS_IAMBIC = "key/iambic"
+"""QSettings key: 'A' or 'B'."""
+SETTINGS_RATIO = "key/dah_ratio"
+"""QSettings key: dah length in dits."""
+SETTINGS_WEIGHT = "key/weight"
+"""QSettings key: weight in percent."""
 DEFAULT_SIDETONE_HZ = 600
 """A comfortable pitch to key with; the beeper's 2491 Hz is shrill to sit next to."""
 SIDETONE_MAX_HZ = 4000
@@ -861,6 +867,32 @@ def load_bindings(settings: QtCore.QSettings) -> dict[str, str]:
 def save_bindings(settings: QtCore.QSettings, bindings: dict[str, str]) -> None:
     settings.setValue(SETTINGS_BINDINGS, json.dumps(bindings, sort_keys=True))
     settings.sync()
+
+
+def load_iambic(settings: QtCore.QSettings) -> str:
+    """'A' or 'B' from ``settings``; 'A' when absent or anything else."""
+    raw = settings.value(SETTINGS_IAMBIC, "A")
+    return "B" if str(raw).strip().upper() == "B" else "A"
+
+
+def load_dah_ratio(settings: QtCore.QSettings) -> float:
+    """Dah length in dits from ``settings``; 3.0 when absent or out of range."""
+    raw = settings.value(SETTINGS_RATIO, 3.0)
+    try:
+        value = round(float(raw), 1)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 3.0
+    return value if DAH_RATIO_RANGE[0] <= value <= DAH_RATIO_RANGE[1] else 3.0
+
+
+def load_weight(settings: QtCore.QSettings) -> int:
+    """Weight in percent from ``settings``; 50 when absent or out of range."""
+    raw = settings.value(SETTINGS_WEIGHT, 50)
+    try:
+        value = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 50
+    return value if WEIGHT_RANGE[0] <= value <= WEIGHT_RANGE[1] else 50
 
 
 def load_sidetone(settings: QtCore.QSettings) -> int:
@@ -944,7 +976,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._inject_pos: int = 0
         # The hand key (section E): a straight key on Space or the button, or
         # two paddles on the arrow keys. The output stream opens on first use.
-        self._keyer = Keyer(1200.0 / 8.0, "straight")
+        self._iambic: str = load_iambic(self.settings)
+        self._dah_ratio: float = load_dah_ratio(self.settings)
+        self._weight: int = load_weight(self.settings)
+        self._keyer = Keyer(1200.0 / 8.0, "straight", iambic=self._iambic,  # type: ignore[arg-type]
+                            dah_ratio=self._dah_ratio, weight=self._weight)
         self._livekey: LiveKey | None = None
         self._bindings: dict[str, str] = load_bindings(self.settings)
         self._sidetone_hz: int = load_sidetone(self.settings)
@@ -1495,8 +1531,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.key_straight = QtWidgets.QPushButton("Single key")
         self.key_straight.setObjectName("segL")
         self.key_paddle = QtWidgets.QPushButton("Two keys")
-        self.key_paddle.setObjectName("segR")
-        for b in (self.key_straight, self.key_paddle):
+        self.key_paddle.setObjectName("segM")
+        self.key_bug = QtWidgets.QPushButton("Bug")
+        self.key_bug.setObjectName("segR")
+        self.key_bug.setToolTip("Semi-automatic key: dits are made for you, dahs by hand")
+        for b in (self.key_straight, self.key_paddle, self.key_bug):
             b.setCheckable(True)
             b.setFont(self._font(12))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1506,9 +1545,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.key_group.setExclusive(True)
         self.key_group.addButton(self.key_straight)
         self.key_group.addButton(self.key_paddle)
+        self.key_group.addButton(self.key_bug)
         self.key_straight.setChecked(True)
         self.key_straight.clicked.connect(lambda: self._on_key_mode("straight"))
         self.key_paddle.clicked.connect(lambda: self._on_key_mode("paddle"))
+        self.key_bug.clicked.connect(lambda: self._on_key_mode("bug"))
         row.addWidget(seg)
         row.addWidget(self._field_label("Sidetone"))
         self.sidetone_spin = self._spin(0, SIDETONE_MAX_HZ, self._sidetone_hz, width=72)
@@ -1529,6 +1570,58 @@ class MainWindow(QtWidgets.QMainWindow):
         self.key_reset_button.clicked.connect(self._reset_bindings)
         row.addWidget(self.key_reset_button)
         left_lay.addLayout(row)
+
+        krow = QtWidgets.QHBoxLayout()
+        krow.setSpacing(10)
+        krow.addWidget(self._field_label("Iambic"))
+        iseg = QtWidgets.QWidget()
+        iseg_lay = QtWidgets.QHBoxLayout(iseg)
+        iseg_lay.setContentsMargins(0, 0, 0, 0)
+        iseg_lay.setSpacing(0)
+        self.iambic_a = QtWidgets.QPushButton("A")
+        self.iambic_a.setObjectName("segL")
+        self.iambic_a.setToolTip("Mode A: let go of both paddles and the element in progress ends the character")
+        self.iambic_b = QtWidgets.QPushButton("B")
+        self.iambic_b.setObjectName("segR")
+        self.iambic_b.setToolTip("Mode B: let go of both paddles during an element and one opposite element follows")
+        for b in (self.iambic_a, self.iambic_b):
+            b.setCheckable(True)
+            b.setFont(self._font(12))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            iseg_lay.addWidget(b)
+        self.iambic_group = QtWidgets.QButtonGroup(self)
+        self.iambic_group.setExclusive(True)
+        self.iambic_group.addButton(self.iambic_a)
+        self.iambic_group.addButton(self.iambic_b)
+        (self.iambic_b if self._iambic == "B" else self.iambic_a).setChecked(True)
+        self.iambic_a.clicked.connect(lambda: self._on_iambic("A"))
+        self.iambic_b.clicked.connect(lambda: self._on_iambic("B"))
+        krow.addWidget(iseg)
+        krow.addWidget(self._field_label("Dah ratio"))
+        self.ratio_spin = QtWidgets.QDoubleSpinBox()
+        self.ratio_spin.setRange(DAH_RATIO_RANGE[0], DAH_RATIO_RANGE[1])
+        self.ratio_spin.setDecimals(1)
+        self.ratio_spin.setSingleStep(0.1)
+        self.ratio_spin.setValue(self._dah_ratio)
+        self.ratio_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.ratio_spin.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.ratio_spin.setFixedWidth(60)
+        self.ratio_spin.setFont(self._font(13, mono=True))
+        self.ratio_spin.setKeyboardTracking(False)
+        self.ratio_spin.setToolTip("Dah length in dits; 3 is standard")
+        self.ratio_spin.valueChanged.connect(self._on_weighting_changed)
+        krow.addWidget(self.ratio_spin)
+        krow.addWidget(self._label("× dit", 13, t.ink3, mono=True))
+        krow.addWidget(self._field_label("Weight"))
+        self.weight_spin = self._spin(int(WEIGHT_RANGE[0]), int(WEIGHT_RANGE[1]), self._weight, width=60)
+        self.weight_spin.setToolTip("Marks longer and the spaces after them shorter by the same amount; "
+                                    "50 is standard")
+        self.weight_spin.valueChanged.connect(self._on_weighting_changed)
+        krow.addWidget(self.weight_spin)
+        krow.addWidget(self._label("%", 13, t.ink3, mono=True))
+        krow.addStretch(1)
+        left_lay.addLayout(krow)
 
         pad = QtWidgets.QHBoxLayout()
         pad.setSpacing(12)
@@ -1590,8 +1683,10 @@ class MainWindow(QtWidgets.QMainWindow):
             right_lay.addWidget(ro)
         note = QtWidgets.QLabel("Two keys work like an electronic keyer: each press sends one correctly timed "
                                 "element at the encoder speed, repeats while held, holding both alternates, "
-                                "and a tap during an element is remembered. Change key picks another "
-                                "keyboard key; the choice is remembered. You hear the sidetone; the decoder "
+                                "and a tap during an element is remembered (iambic A, or B for one extra "
+                                "element after a squeeze). Bug: dits are automatic, dahs by hand on the dah "
+                                "key. Dah ratio and weight shape the elements. Change key picks another "
+                                "keyboard key; every choice is remembered. You hear the sidetone; the decoder "
                                 "is fed the beeper frequency. Sent is read from your keying itself; with Feed "
                                 "the decoder on and a source open, the decoder above reads it too.")
         note.setFont(self._font(12))
@@ -2475,7 +2570,34 @@ class MainWindow(QtWidgets.QMainWindow):
             return (f"<b>{html.escape(key_label(b['dit']))}</b> sends dits and "
                     f"<b>{html.escape(key_label(b['dah']))}</b> sends dahs at the encoder speed; "
                     "hold to repeat, hold both to alternate.")
+        if mode == "bug":
+            return (f"<b>{html.escape(key_label(b['dit']))}</b> sends dits while held; "
+                    f"<b>{html.escape(key_label(b['dah']))}</b> keys the tone by hand, like a bug's dah lever.")
         return f"Hold <b>{html.escape(key_label(b['key']))}</b> or the button: the tone sounds while it is held."
+
+    # ------------------------------------------------------- keyer variants
+
+    def _apply_keyer_settings(self) -> None:
+        lk = self._livekey
+        if lk is not None and lk.running:
+            lk.set_iambic(self._iambic)  # type: ignore[arg-type]
+            lk.set_weighting(self._dah_ratio, self._weight)
+        else:
+            self._keyer.set_iambic(self._iambic)  # type: ignore[arg-type]
+            self._keyer.set_weighting(self._dah_ratio, self._weight)
+
+    def _on_iambic(self, which: str) -> None:
+        self._iambic = which
+        self.settings.setValue(SETTINGS_IAMBIC, which)
+        self._apply_keyer_settings()
+
+    def _on_weighting_changed(self, *_: object) -> None:
+        self._dah_ratio = round(float(self.ratio_spin.value()), 1)
+        self._weight = int(self.weight_spin.value())
+        self.settings.setValue(SETTINGS_RATIO, self._dah_ratio)
+        self.settings.setValue(SETTINGS_WEIGHT, self._weight)
+        self._apply_keyer_settings()
+        self._refresh_key_readouts()
 
     # ------------------------------------------------------- key bindings
 
@@ -2533,10 +2655,12 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def _apply_key_mode_ui(self, mode: str) -> None:
-        paddle = mode == "paddle"
-        self.key_columns["key"].setVisible(not paddle)
-        self.key_columns["dit"].setVisible(paddle)
-        self.key_columns["dah"].setVisible(paddle)
+        paddles = mode in ("paddle", "bug")
+        self.key_columns["key"].setVisible(not paddles)
+        self.key_columns["dit"].setVisible(paddles)
+        self.key_columns["dah"].setVisible(paddles)
+        self.iambic_a.setEnabled(mode == "paddle")
+        self.iambic_b.setEnabled(mode == "paddle")
         self._capture_action = None
         self.key_help.setText(self._key_help_text(mode))
         for b in (self.key_button, self.dit_button, self.dah_button):
@@ -2564,7 +2688,9 @@ class MainWindow(QtWidgets.QMainWindow):
         wpm = float(self.enc_wpm_spin.value())
         dit = 1200.0 / wpm
         self.key_readouts["Speed"].set_value(f"{wpm:.0f}", "WPM")
-        self.key_readouts["Dit · dah"].set_value(f"{round(dit)} · {round(3 * dit)} ms")
+        w = self._weight / 50.0
+        self.key_readouts["Dit · dah"].set_value(
+            f"{round(w * dit)} · {round((self._dah_ratio + w - 1.0) * dit)} ms")
         if self._sidetone_hz:
             self.key_readouts["Sidetone"].set_value(f"{self._sidetone_hz}", "Hz")
         else:
@@ -2614,9 +2740,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if action == "key" and mode == "straight":
             which: str | None = None
             button = self.key_button
-        elif action == "dit" and mode == "paddle":
+        elif action == "dit" and mode in ("paddle", "bug"):
             which, button = "dit", self.dit_button
-        elif action == "dah" and mode == "paddle":
+        elif action == "dah" and mode in ("paddle", "bug"):
             which, button = "dah", self.dah_button
         else:
             return False

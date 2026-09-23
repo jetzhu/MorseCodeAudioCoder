@@ -30,6 +30,14 @@ while held, like an electronic keyer; holding both alternates and a tap during
 an element is remembered. The Sent line reads back what you keyed; with Feed
 the decoder on and the decoder listening, the decoder reads it too.
 
+**Iambic A or B** chooses what a squeeze does when both paddles are let go:
+A ends with the element in progress, B adds one opposite element. **Bug**
+is a semi-automatic key: the dit key sends automatic dits while held and the
+dah key sounds the tone for as long as you hold it. **Dah ratio** sets the
+dah length in dits (3 standard) and **Weight** lengthens marks and shortens
+the spaces after them by the same amount (50 standard). All of it is
+remembered.
+
 **Change key** under a button picks any other keyboard key (press it, then
 the key; Esc keeps the old one; Reset keys restores the defaults). The choice
 is remembered between runs. **Sidetone** is the pitch you hear while keying,

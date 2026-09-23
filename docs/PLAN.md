@@ -234,7 +234,8 @@ Candidate enhancements noted at the same time, not built:
 - Configurable key bindings and a sidetone pitch separate from the beeper
   frequency. Built 2026-09-22 (v0.1.7).
 - Export of the decoded log with timestamps. Built 2026-09-22 (v0.1.8).
-- Keyer weighting and mode variants (iambic A and B, bug mode).
+- Keyer weighting and mode variants (iambic A and B, bug mode). Built
+  2026-09-22 (v0.1.9).
 
 ## 9. Risks
 

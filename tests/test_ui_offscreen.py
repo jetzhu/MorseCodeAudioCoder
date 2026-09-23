@@ -533,3 +533,53 @@ def test_decoded_log_is_stamped_and_saved(qapp, window: ui.MainWindow, tmp_path:
     lines = csv.splitlines()
     assert lines[0] == "time,elapsed_s,word" and lines[1].endswith(",SOS") and len(lines) == 2
     assert float(lines[1].split(",")[1]) == pytest.approx(words[0].elapsed_ms / 1000.0, abs=0.006)
+
+
+def test_keyer_variants_controls_apply_and_persist(qapp, window: ui.MainWindow, settings, fake_sd) -> None:
+    from PySide6.QtCore import Qt
+
+    k = window._keyer
+    assert (k.iambic, k.dah_ratio, k.weight) == ("A", 3.0, 50.0)
+    assert window.iambic_a.isChecked() and not window.iambic_a.isEnabled()  # single key: no iambic choice
+    window.key_bug.click()
+    assert k.mode == "bug"
+    assert window.dit_button.isVisibleTo(window) and window.dah_button.isVisibleTo(window)
+    assert not window.key_button.isVisibleTo(window)
+    assert "bug" in window.key_help.text()
+    assert not window.iambic_b.isEnabled()
+    # The bound dah key works the lever: tone while held.
+    press(window, Qt.Key.Key_Right)
+    assert window._livekey is not None and window._livekey.is_on()
+    press(window, Qt.Key.Key_Right, down=False)
+    assert not window._livekey.is_on()
+    window.key_paddle.click()
+    assert k.mode == "paddle" and window.iambic_b.isEnabled()
+    window.iambic_b.click()
+    assert k.iambic == "B"
+    window.ratio_spin.setValue(3.5)
+    window.weight_spin.setValue(60)
+    assert (k.dah_ratio, k.weight) == (3.5, 60.0)
+    window.enc_wpm_spin.setValue(12)  # 100 ms dit: marks 120 and 370 ms
+    assert window.key_readouts["Dit \u00b7 dah"].value.text().startswith("120 \u00b7 370")
+    settings.sync()
+    other = ui.make_window(replay_args(), settings=settings)
+    try:
+        assert (other._keyer.iambic, other._keyer.dah_ratio, other._keyer.weight) == ("B", 3.5, 60.0)
+        assert other.iambic_b.isChecked() and other.ratio_spin.value() == 3.5 and other.weight_spin.value() == 60
+    finally:
+        other.close()
+    window.stop()
+
+
+def test_keyer_preference_loaders_survive_garbage(tmp_path: Path) -> None:
+    from PySide6 import QtCore
+
+    s = QtCore.QSettings(str(tmp_path / "bad2.ini"), QtCore.QSettings.Format.IniFormat)
+    s.setValue(ui.SETTINGS_IAMBIC, "Z")
+    s.setValue(ui.SETTINGS_RATIO, "wide")
+    s.setValue(ui.SETTINGS_WEIGHT, 99)
+    assert (ui.load_iambic(s), ui.load_dah_ratio(s), ui.load_weight(s)) == ("A", 3.0, 50)
+    s.setValue(ui.SETTINGS_IAMBIC, " b ")
+    s.setValue(ui.SETTINGS_RATIO, 4.25)
+    s.setValue(ui.SETTINGS_WEIGHT, "30")
+    assert (ui.load_iambic(s), ui.load_dah_ratio(s), ui.load_weight(s)) == ("B", 4.2, 30)

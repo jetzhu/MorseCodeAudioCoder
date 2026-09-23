@@ -577,8 +577,12 @@ audio; mirrored by `web/js/keyer.js`.
 
 ```python
 class Keyer:                      # pure state machine; all times are ms on one caller-chosen clock
-    def __init__(self, dit_ms: float = 150.0, mode: Literal["straight", "paddle"] = "straight"): ...
+    def __init__(self, dit_ms: float = 150.0, mode: Literal["straight", "paddle", "bug"] = "straight",
+                 iambic: Literal["A", "B"] = "A", dah_ratio: float = 3.0, weight: float = 50.0): ...
     def set_speed(self, dit_ms: float) -> None
+    def set_iambic(self, iambic) -> None                            # paddle mode: 'A' or 'B'
+    def set_weighting(self, dah_ratio=None, weight=None) -> None    # ranges DAH_RATIO_RANGE (2..5), WEIGHT_RANGE (25..75)
+    def mark_ms(self, which) -> float; gap_ms: float                # w T / (ratio + w - 1) T; (2 - w) T, w = weight / 50
     def set_mode(self, mode, t: float) -> list[tuple[float, bool]]   # releases everything, ends a sounding tone
     def release_all(self, t) -> list[tuple[float, bool]]             # drops edges logged ahead of t, then OFF at t
     def key_down(self, t) / key_up(self, t) -> list[tuple[float, bool]]        # straight key
@@ -596,7 +600,8 @@ class LiveKey:                    # real-time tone through a sounddevice OutputS
     def __init__(self, keyer, f0=2491.0, fs=48000, device=None, amplitude=0.3, ramp_ms=3.0, block_size=480): ...
     def start(self) / stop(self); running: bool; def now_ms(self) -> float   # the keyer clock: ms since start
     def key_down(self) / key_up(self) / paddle_down(which) / paddle_up(which) / release_all(self)
-    def set_mode(mode) / set_speed(dit_ms) / set_frequency(f0); def is_on(self) -> bool
+    def set_mode(mode) / set_speed(dit_ms) / set_frequency(f0) / set_sidetone(hz) / set_iambic(x) / set_weighting(r, w)
+    def is_on(self) -> bool
     def transitions_since(self, index)              # thread-safe
     def feed_block(self, t0_ms, n) -> np.ndarray    # the key's tone for a time window, for the decoder feed
 ```
@@ -608,6 +613,19 @@ running, the other paddle is remembered and sent next. At the gap end
 `tick` starts the next element when a paddle is held (both held alternate,
 memory first), else goes idle; a tick at the element end only opens the
 gap. Releasing a paddle never cuts an element short; `release_all` does.
+Iambic A (default) stops with the element in progress when both paddles are
+let go; iambic B sends one more opposite element when both paddles were
+squeezed during the element and both are released (`_squeezed`, set when
+both are held during an element, cleared when the extra element goes out).
+Bug mode: the dit paddle repeats automatic dits; the dah paddle is a lever
+that keys the tone directly (`_manual`): pressing it drops a dit's future
+OFF edge so the tone runs on, ticks are suspended, and releasing it emits
+OFF and, with the dit paddle still held, opens one space before dits
+resume. Weighting: `mark_ms(which)` and `gap_ms` replace the fixed 1/3/1
+dits (period constant). Both apps keep Setup (Single key / Two keys / Bug),
+Iambic A/B, Dah ratio and Weight; the desktop in QSettings `key/iambic`,
+`key/dah_ratio`, `key/weight`, the web in localStorage `morse.key.iambic`,
+`morse.key.ratio`, `morse.key.weight` (v0.1.9, 2026-09-22).
 The log is bounded (4000) and never out of time order. `LiveKey`'s stream
 callback advances the keyer with the stream clock (sample-accurate elements)
 and renders the envelope with 3 ms ramps; presses from the UI thread are
