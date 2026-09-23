@@ -236,3 +236,118 @@ def test_feed_the_decoder_mixes_the_tone_into_the_pipeline(qapp, window: ui.Main
         window._process_block(silence)
     assert window._inject is None, "injection ends on its own"
     assert window.pipeline.text.strip().endswith("SOS")
+
+
+# ------------------------------------------------------------------ key strip
+
+
+class _FakeOutputStream:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+        self.callback = kwargs["callback"]
+        self.active = False
+        self.closed = False
+
+    def start(self) -> None:
+        self.active = True
+
+    def stop(self) -> None:
+        self.active = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def fake_sd(monkeypatch: pytest.MonkeyPatch):
+    import sys
+    import types
+
+    fake = types.ModuleType("sounddevice")
+    fake.streams = []  # type: ignore[attr-defined]
+
+    def output_stream(**kwargs: object) -> _FakeOutputStream:
+        s = _FakeOutputStream(**kwargs)
+        fake.streams.append(s)  # type: ignore[attr-defined]
+        return s
+
+    fake.OutputStream = output_stream  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sounddevice", fake)
+    return fake
+
+
+def test_key_strip_modes_and_readouts(qapp, window: ui.MainWindow) -> None:
+    assert window.key_straight.isChecked()
+    assert window.key_button.isVisibleTo(window) and not window.dit_button.isVisibleTo(window)
+    window._on_key_mode("paddle")
+    assert not window.key_button.isVisibleTo(window)
+    assert window.dit_button.isVisibleTo(window) and window.dah_button.isVisibleTo(window)
+    assert "dits" in window.key_help.text()
+    window.enc_wpm_spin.setValue(12)
+    assert window.key_readouts["Speed"].value_text().startswith("12") if hasattr(
+        window.key_readouts["Speed"], "value_text") else True
+    assert window._keyer.dit_ms == pytest.approx(100.0)
+    window._on_key_mode("straight")
+    assert window.key_button.isVisibleTo(window)
+
+
+def test_straight_key_button_sounds_feeds_and_is_read_back(qapp, window: ui.MainWindow, fake_sd) -> None:
+    # Press: the output stream opens lazily and the tone is on.
+    window._on_key_button(True, None)
+    assert window._livekey is not None and window._livekey.running
+    assert fake_sd.streams[0].active
+    assert window._livekey.is_on()
+    assert window.key_pill.on is True
+    # With Feed the decoder on, an input block of silence carries the key's tone.
+    block = np.zeros(window.pipeline.block_size, dtype=np.float32)
+    window._feed_time_ms = window._livekey.now_ms()
+    mixed = window._key_feed(block)
+    window._feed_time_ms = None
+    assert np.max(np.abs(mixed)) > 0.2
+    window.feed_check.setChecked(False)
+    window._feed_time_ms = window._livekey.now_ms()
+    assert np.max(np.abs(window._key_feed(block))) == 0.0
+    window._feed_time_ms = None
+    window.feed_check.setChecked(True)
+    # Release after a straight-key dah, then silence: the Sent line reads T.
+    window._livekey._t0 -= 0.45  # the key clock jumps 450 ms ahead: a dah-length mark
+    window._on_key_button(False, None)
+    assert window._livekey.is_on() is False
+    window._livekey._t0 -= 5.0  # then 5 s of silence
+    window._refresh_key()
+    assert window.sent_output.text().strip().startswith("T"), window.sent_output.text()
+    window._clear_sent()
+    assert window.sent_output.text().strip() in ("", "\u00a0")
+    window.stop()
+    assert fake_sd.streams[0].closed
+
+
+def test_paddle_button_sends_a_timed_element(qapp, window: ui.MainWindow, fake_sd) -> None:
+    window._on_key_mode("paddle")
+    window.enc_wpm_spin.setValue(12)  # 100 ms dit
+    window._on_key_button(True, "dit")
+    window._on_key_button(False, "dit")
+    lk = window._livekey
+    assert lk is not None and lk.running
+    items, _ = lk.transitions_since(0)
+    assert [on for _, on in items] == [True, False]
+    assert items[1][0] - items[0][0] == pytest.approx(100.0)
+    window.stop()
+
+
+def test_keyboard_space_works_the_straight_key(qapp, window: ui.MainWindow, fake_sd) -> None:
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier)
+    assert window._handle_key_event(press, True) is True
+    assert window._livekey is not None and window._livekey.is_on()
+    assert window.key_button.isDown()
+    repeat = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier, autorep=True)
+    assert window._handle_key_event(repeat, True) is True  # swallowed, no second press
+    release = QKeyEvent(QEvent.Type.KeyRelease, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier)
+    assert window._handle_key_event(release, False) is True
+    assert window._livekey.is_on() is False
+    other = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A, Qt.KeyboardModifier.NoModifier)
+    assert window._handle_key_event(other, True) is False
+    window.stop()

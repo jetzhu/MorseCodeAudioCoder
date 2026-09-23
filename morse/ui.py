@@ -52,6 +52,8 @@ from morse import table
 from morse.decoder import MorseDecoder
 from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
+from morse.keyer import Keyer, LiveKey
+from morse.runs import Run
 from morse.player import TonePlayer, build_timing, render_tone
 
 __all__ = [
@@ -726,11 +728,13 @@ class KeyingGuide(_Painted):
 
 
 class Pill(QtWidgets.QLabel):
-    """The detector state pill: amber ``ON`` or quiet ``OFF``."""
+    """A state pill: amber when on (``ON``, or ``labels[0]``), quiet when off."""
 
-    def __init__(self, theme: Theme, fonts: Fonts, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, theme: Theme, fonts: Fonts, parent: QtWidgets.QWidget | None = None,
+                 labels: tuple[str, str] = ("ON", "OFF")) -> None:
         super().__init__(parent)
         self.theme = theme
+        self.labels = labels
         self.setFont(make_font(fonts, 12, weight=QtGui.QFont.Weight.DemiBold, spacing_em=0.05))
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.on = None
@@ -748,7 +752,7 @@ class Pill(QtWidgets.QLabel):
             f"QLabel {{ color: {colour}; border: 1px solid {border}; border-radius: 10px;"
             f" background: {t.panel}; padding: 1px 9px 1px 7px; }}"
         )
-        self.setText(f'<span style="color:{dot}">●</span>&nbsp;{"ON" if on else "OFF"}')
+        self.setText(f'<span style="color:{dot}">●</span>&nbsp;{self.labels[0] if on else self.labels[1]}')
 
 
 class Readout(QtWidgets.QWidget):
@@ -854,6 +858,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # and microphone); ``_inject_pos`` is the next sample to mix.
         self._inject: np.ndarray | None = None
         self._inject_pos: int = 0
+        # The hand key (section E): a straight key on Space or the button, or
+        # two paddles on the arrow keys. The output stream opens on first use.
+        self._keyer = Keyer(1200.0 / 8.0, "straight")
+        self._livekey: LiveKey | None = None
+        self._sent_dec = MorseDecoder()
+        self._sent_index: int = 0
+        self._sent_last: tuple[float, bool] | None = None
+        self._feed_time_ms: float | None = None
         self._encoding: Encoding = build_encoding("", 8)
 
         self.setWindowTitle("Beeper Morse Console")
@@ -941,6 +953,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(self._build_toolbar(manual_wpm))
         root.addWidget(self._build_body(), 1)
         root.addWidget(self._build_encode())
+        root.addWidget(self._build_key())
         root.addWidget(self._build_statusbar())
         self.setCentralWidget(central)
 
@@ -1345,6 +1358,133 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addWidget(body)
         return frame
 
+    def _build_key(self) -> QtWidgets.QWidget:
+        """Section E: send Morse by hand with the keyboard or the mouse."""
+        t = self.theme
+        frame = QtWidgets.QFrame()
+        frame.setObjectName("encode")
+        lay = QtWidgets.QVBoxLayout(frame)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._header("Key", "· send Morse yourself with the keyboard or the mouse; "
+                                          "the decoder reads it back", "E"))
+        body = QtWidgets.QWidget()
+        body_lay = QtWidgets.QHBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+
+        left = QtWidgets.QWidget()
+        left_lay = QtWidgets.QVBoxLayout(left)
+        left_lay.setContentsMargins(14, 8, 14, 12)
+        left_lay.setSpacing(8)
+
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(self._field_label("Setup"))
+        seg = QtWidgets.QWidget()
+        seg_lay = QtWidgets.QHBoxLayout(seg)
+        seg_lay.setContentsMargins(0, 0, 0, 0)
+        seg_lay.setSpacing(0)
+        self.key_straight = QtWidgets.QPushButton("Single key")
+        self.key_straight.setObjectName("segL")
+        self.key_paddle = QtWidgets.QPushButton("Two keys")
+        self.key_paddle.setObjectName("segR")
+        for b in (self.key_straight, self.key_paddle):
+            b.setCheckable(True)
+            b.setFont(self._font(12))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            seg_lay.addWidget(b)
+        self.key_group = QtWidgets.QButtonGroup(self)
+        self.key_group.setExclusive(True)
+        self.key_group.addButton(self.key_straight)
+        self.key_group.addButton(self.key_paddle)
+        self.key_straight.setChecked(True)
+        self.key_straight.clicked.connect(lambda: self._on_key_mode("straight"))
+        self.key_paddle.clicked.connect(lambda: self._on_key_mode("paddle"))
+        row.addWidget(seg)
+        self.key_pill = Pill(self.theme, self.fonts, labels=("SENDING", "SILENT"))
+        row.addWidget(self.key_pill)
+        self.key_help = self._label("", 12, t.ink2)
+        self.key_help.setTextFormat(Qt.TextFormat.RichText)
+        row.addWidget(self.key_help, 1)
+        left_lay.addLayout(row)
+
+        pad = QtWidgets.QHBoxLayout()
+        pad.setSpacing(12)
+        self.key_button = self._key_button("Key", "Space")
+        self.dit_button = self._key_button("Dit", "← left arrow")
+        self.dah_button = self._key_button("Dah", "→ right arrow")
+        self.key_button.pressed.connect(lambda: self._on_key_button(True, None))
+        self.key_button.released.connect(lambda: self._on_key_button(False, None))
+        self.dit_button.pressed.connect(lambda: self._on_key_button(True, "dit"))
+        self.dit_button.released.connect(lambda: self._on_key_button(False, "dit"))
+        self.dah_button.pressed.connect(lambda: self._on_key_button(True, "dah"))
+        self.dah_button.released.connect(lambda: self._on_key_button(False, "dah"))
+        for b in (self.key_button, self.dit_button, self.dah_button):
+            pad.addWidget(b)
+        pad.addStretch(1)
+        left_lay.addLayout(pad)
+
+        sent_row = QtWidgets.QHBoxLayout()
+        sent_row.setSpacing(10)
+        sent_row.addWidget(self._label("SENT", 12, t.ink2, spacing_em=0.04))
+        self.sent_output = QtWidgets.QLabel(" ")
+        self.sent_output.setObjectName("encOut")
+        self.sent_output.setFont(self._font(16, mono=True, spacing_em=0.06))
+        self.sent_output.setTextFormat(Qt.TextFormat.RichText)
+        self.sent_output.setMinimumHeight(30)
+        self.sent_output.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        sent_row.addWidget(self.sent_output, 1)
+        self.sent_clear_button = self._button("Clear")
+        self.sent_clear_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.sent_clear_button.clicked.connect(self._clear_sent)
+        sent_row.addWidget(self.sent_clear_button)
+        left_lay.addLayout(sent_row)
+        body_lay.addWidget(left, 1)
+
+        right = QtWidgets.QFrame()
+        right.setObjectName("encRight")
+        right.setFixedWidth(RAIL_WIDTH)
+        right_lay = QtWidgets.QVBoxLayout(right)
+        right_lay.setContentsMargins(14, 12, 14, 12)
+        right_lay.setSpacing(10)
+        self.key_readouts: dict[str, Readout] = {}
+        for key in ("Speed", "Dit · dah"):
+            ro = Readout(self.theme, self.fonts, key)
+            self.key_readouts[key] = ro
+            right_lay.addWidget(ro)
+        note = QtWidgets.QLabel("Two keys work like an electronic keyer: each press sends one correctly timed "
+                                "element at the encoder speed, repeats while held, holding both alternates, "
+                                "and a tap during an element is remembered. Sent is read from your keying "
+                                "itself; with Feed the decoder on and a source open, the decoder above reads "
+                                "it too.")
+        note.setFont(self._font(12))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {t.ink3};")
+        right_lay.addWidget(note)
+        right_lay.addStretch(1)
+        body_lay.addWidget(right)
+        lay.addWidget(body)
+        self._apply_key_mode_ui("straight")
+        return frame
+
+    def _key_button(self, title: str, hint: str) -> QtWidgets.QPushButton:
+        """A large press-and-hold key button; keyboard focus stays with the window."""
+        t = self.theme
+        btn = QtWidgets.QPushButton(f"{title}\n{hint}")
+        btn.setMinimumSize(160, 60)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setFont(self._font(15, weight=QtGui.QFont.Weight.DemiBold))
+        btn.setStyleSheet(
+            f"QPushButton {{ background: {t.panel}; color: {t.ink}; border: 2px solid {t.line};"
+            f" border-radius: 6px; padding: 6px 18px; }}"
+            f"QPushButton:hover {{ border-color: {t.ink3}; }}"
+            f"QPushButton:pressed {{ background: {t.on}; border-color: {t.on}; color: white; }}"
+        )
+        return btn
+
     def _build_statusbar(self) -> QtWidgets.QWidget:
         t = self.theme
         bar = QtWidgets.QFrame()
@@ -1504,9 +1644,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_status()
 
     def stop(self) -> None:
-        """Stop the timer, the audio source and any playback."""
+        """Stop the timer, the audio source, any playback and the key's output stream."""
         self.timer.stop()
         self._stop_play()
+        if self._livekey is not None:
+            self._livekey.stop()
         if self._source is not None:
             try:
                 self._source.stop()
@@ -1557,8 +1699,15 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             if blocks:
                 tick_level = -math.inf
-                for block in blocks:
+                lk = self._livekey
+                now_ms = lk.now_ms() if lk is not None and lk.running else None
+                for j, block in enumerate(blocks):
+                    # Each block is stamped with the key's clock at the time it was
+                    # captured, so a keyed tone lands at the right place in it.
+                    self._feed_time_ms = (None if now_ms is None
+                                          else now_ms - (len(blocks) - j) * self.pipeline.block_ms)
                     tick_level = max(tick_level, self._process_block(block))
+                self._feed_time_ms = None
                 self._level_db = tick_level
             if self.replay and not self.replay_finished and self._source is not None \
                     and getattr(self._source, "finished", False):
@@ -1571,7 +1720,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _process_block(self, block: np.ndarray) -> float:
         """Run one block through the pipeline and the history buffers; returns its level."""
-        block = self._mix_injected(block)
+        block = self._key_feed(self._mix_injected(block))
         result = self.pipeline.process_block(block)
         self._last = result
         self._raw.extend(block)
@@ -1614,6 +1763,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_power()
         self._refresh_decoded()
         self._refresh_rail()
+        self._refresh_key()
         self._refresh_status()
 
     def _refresh_spectrum(self, blocks_this_tick: int) -> None:
@@ -1796,6 +1946,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.f3_marker.setValue(3 * f0)
         self.f3_marker.setVisible(3 * f0 <= SPECTRUM_FMAX_HZ)
         self.enc_readouts["Tone"].set_value(f"{f0:.0f}", "Hz")
+        if self._livekey is not None:
+            try:
+                self._livekey.set_frequency(f0)
+            except ValueError:
+                pass  # the pipeline already validated f0 against its own rate
         if self.freq_spin.value() != int(round(f0)):
             self.freq_spin.blockSignals(True)
             self.freq_spin.setValue(int(round(f0)))
@@ -1923,6 +2078,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.set_status_error(str(exc))
             return
         self._encoding = enc
+        self._set_key_speed(float(self.enc_wpm_spin.value()))
         if enc.morse:
             parts = [html.escape(p) for p in enc.morse.split(table.WORD_SEP)]
             self.morse_output.setText(f' <span style="color:{t.ink3}">/</span> '.join(parts))
@@ -1943,6 +2099,154 @@ class MainWindow(QtWidgets.QMainWindow):
     def decoded_text(self) -> str:
         """Everything decoded so far, as shown in the decoded-text widget."""
         return self.text_view.toPlainText()
+
+    # ---------------------------------------------------------------- key
+
+    _KEY_HELP = {
+        "straight": "Hold <b>Space</b> or the button: the tone sounds while it is held.",
+        "paddle": "<b>←</b> sends dits and <b>→</b> sends dahs at the encoder speed; "
+                  "hold to repeat, hold both to alternate.",
+    }
+
+    def _ensure_livekey(self) -> bool:
+        """Open the key's output stream on first use; False (with a status message) on failure."""
+        if self._livekey is not None and self._livekey.running:
+            return True
+        try:
+            if self._livekey is None:
+                self._livekey = LiveKey(self._keyer, f0=self.pipeline.f0, fs=DEFAULT_FS)
+            self._livekey.set_frequency(self.pipeline.f0)
+            self._livekey.set_speed(1200.0 / float(self.enc_wpm_spin.value()))
+            self._livekey.start()
+        except Exception as exc:  # no output device, PortAudio error
+            self.set_status_error(f"Key failed: {exc}")
+            return False
+        self.set_status_error("")
+        return True
+
+    def _apply_key_mode_ui(self, mode: str) -> None:
+        paddle = mode == "paddle"
+        self.key_button.setVisible(not paddle)
+        self.dit_button.setVisible(paddle)
+        self.dah_button.setVisible(paddle)
+        self.key_help.setText(self._KEY_HELP[mode])
+        for b in (self.key_button, self.dit_button, self.dah_button):
+            b.setDown(False)
+        self._refresh_key_readouts()
+
+    def _on_key_mode(self, mode: str) -> None:
+        if self._livekey is not None and self._livekey.running:
+            self._livekey.set_mode(mode)  # type: ignore[arg-type]
+        else:
+            self._keyer.set_mode(mode, 0.0)  # type: ignore[arg-type]
+        self._apply_key_mode_ui(mode)
+
+    def _set_key_speed(self, wpm: float) -> None:
+        dit_ms = 1200.0 / wpm
+        if self._livekey is not None and self._livekey.running:
+            self._livekey.set_speed(dit_ms)
+        else:
+            self._keyer.set_speed(dit_ms)
+        self._refresh_key_readouts()
+
+    def _refresh_key_readouts(self) -> None:
+        if not hasattr(self, "key_readouts"):
+            return
+        wpm = float(self.enc_wpm_spin.value())
+        dit = 1200.0 / wpm
+        self.key_readouts["Speed"].set_value(f"{wpm:.0f}", "WPM")
+        self.key_readouts["Dit · dah"].set_value(f"{round(dit)} · {round(3 * dit)} ms")
+
+    def _on_key_button(self, down: bool, which: str | None) -> None:
+        """Mouse press or release on a key button (``which`` None = straight key)."""
+        if down and not self._ensure_livekey():
+            return
+        lk = self._livekey
+        if lk is None or not lk.running:
+            return
+        if which is None:
+            lk.key_down() if down else lk.key_up()
+        else:
+            lk.paddle_down(which) if down else lk.paddle_up(which)  # type: ignore[arg-type]
+        self._refresh_key()
+
+    def _handle_key_event(self, event: QtGui.QKeyEvent, down: bool) -> bool:
+        """Space keys the straight key; the arrows work the paddles. True when handled."""
+        focus = QtWidgets.QApplication.focusWidget()
+        if isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QAbstractSpinBox, QtWidgets.QComboBox,
+                              QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+            return False
+        key = event.key()
+        mode = self._keyer.mode
+        if key == Qt.Key.Key_Space and mode == "straight":
+            which: str | None = None
+            button = self.key_button
+        elif key == Qt.Key.Key_Left and mode == "paddle":
+            which, button = "dit", self.dit_button
+        elif key == Qt.Key.Key_Right and mode == "paddle":
+            which, button = "dah", self.dah_button
+        else:
+            return False
+        if event.isAutoRepeat():
+            return True
+        self._on_key_button(down, which)
+        button.setDown(down)
+        return True
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        if not self._handle_key_event(event, True):
+            super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        if not self._handle_key_event(event, False):
+            super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:  # noqa: N802
+        # A key released while another window has focus would never be seen.
+        if self._livekey is not None and self._livekey.running:
+            self._livekey.release_all()
+        for b in (self.key_button, self.dit_button, self.dah_button):
+            b.setDown(False)
+        super().focusOutEvent(event)
+
+    def _clear_sent(self) -> None:
+        self._sent_dec.reset()
+        self._sent_last = None
+        if self._livekey is not None:
+            self._sent_index = self._keyer.transition_count
+        self._refresh_key()
+
+    def _refresh_key(self) -> None:
+        """Pill, and the local reading of what the operator keyed."""
+        lk = self._livekey
+        running = lk is not None and lk.running
+        on = bool(running and lk.is_on())
+        self.key_pill.set_on(on)
+        if running:
+            items, self._sent_index = lk.transitions_since(self._sent_index)
+            for t_ms, state in items:
+                if self._sent_last is not None and t_ms > self._sent_last[0]:
+                    blocks = max(1, round((t_ms - self._sent_last[0]) / 10.0))
+                    self._sent_dec.feed(Run(self._sent_last[1], blocks))
+                self._sent_last = (t_ms, state)
+            if self._sent_last is not None and not self._sent_last[1]:
+                self._sent_dec.idle(lk.now_ms() - self._sent_last[0])
+        dec = self._sent_dec
+        symbols = dec.provisional if dec.pending_count else dec.buffer
+        shown = symbols.replace(".", "·").replace("-", "−")
+        text = dec.text if len(dec.text) <= 60 else "…" + dec.text[-60:]
+        html_text = html.escape(text)
+        if shown:
+            html_text += f' <span style="color:{self.theme.ink3}">{html.escape(shown)}</span>'
+        self.sent_output.setText(html_text or " ")
+
+    def _key_feed(self, block: np.ndarray) -> np.ndarray:
+        """Mix the hand key's tone into an input block while Feed the decoder is on."""
+        lk = self._livekey
+        if (lk is None or not lk.running or self._feed_time_ms is None
+                or not self.feed_check.isChecked()):
+            return block
+        return np.asarray(block, dtype=np.float32) + lk.feed_block(self._feed_time_ms, block.size)
 
     def _on_play(self) -> None:
         if self._play_started is not None:

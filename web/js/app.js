@@ -21,6 +21,8 @@ import { ToneDetector, isTonal } from "./detector.js";
 import { MorseDecoder } from "./decoder.js";
 import { TonePlayer, buildGuide, layoutGuideLabels, roundHalfEven } from "./player.js";
 import { MicInput, describeCaptureError, encodeWav, support } from "./audio.js";
+import { Keyer, LiveKey } from "./keyer.js";
+import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
 
@@ -85,6 +87,10 @@ const el = {
   pill: $("statePill"), lvl: $("lvlV"), snr: $("snrV"), wpm: $("wpmV"), cnt: $("cntV"), unk: $("unkV"),
   encIn: $("encIn"), encWpm: $("encWpm"), encPlay: $("encPlay"), encCopy: $("encCopy"), encOut: $("encOut"),
   encFeed: $("encFeed"),
+  keyStraight: $("keyStraight"), keyPaddle: $("keyPaddle"), keyPill: $("keyPill"), keyHelp: $("keyHelp"),
+  keypadStraight: $("keypadStraight"), keypadPaddle: $("keypadPaddle"),
+  keyBtn: $("keyBtn"), ditBtn: $("ditBtn"), dahBtn: $("dahBtn"),
+  sentOut: $("sentOut"), sentClear: $("sentClear"), keySpeed: $("keySpeed"), keyDit: $("keyDit"),
   encDur: $("encDur"), encDit: $("encDit"), encGap: $("encGap"), encTone: $("encTone"),
   stateDot: $("stateDot"), stateV: $("stateV"), blockV: $("blockV"), dropV: $("dropV"), clockV: $("clockV"), rateV: $("rateV"),
   titleDev: $("titleDev"), factTone: $("factTone"), factRate: $("factRate"), factBlock: $("factBlock"),
@@ -383,6 +389,7 @@ function applyFrequency(f0) {
   el.f0.value = String(value);
   el.f0Label.textContent = `${value} Hz`;
   el.encTone.innerHTML = `${value}<small>Hz</small>`;
+  if (liveKey.running) liveKey.setFrequency(value);
   el.factTone.textContent = `${value} Hz`;
   store.set(STORAGE.f0, String(value));
   if (mic) {
@@ -1058,6 +1065,8 @@ const encoder = { text: "", wpm: 8, guide: { timing: [], letters: [], totalMs: 0
 function buildEncoding() {
   const wpm = clamp(parseFloat(el.encWpm.value) || 8, 2, 40);
   encoder.wpm = wpm;
+  keyer.setSpeed(1200 / wpm);
+  updateKeyReadouts();
   encoder.text = el.encIn.value;
   encoder.guide = buildGuide(encoder.text, wpm);
   const morse = encode(encoder.text);
@@ -1139,8 +1148,10 @@ function togglePlay() {
 function syncPlayerFeed() {
   const bus = mic && state.running ? mic.bus : null;
   const want = Boolean(bus) && el.encFeed.checked;
-  for (const node of player.outputs) if (node !== bus || !want) player.removeOutput(node);
-  if (want) player.addOutput(bus);
+  for (const source of [player, liveKey]) {
+    for (const node of source.outputs) if (node !== bus || !want) source.removeOutput(node);
+    if (want) source.addOutput(bus);
+  }
 }
 
 player.onProgress = (ms) => {
@@ -1152,6 +1163,148 @@ player.onEnd = () => {
   el.encPlay.textContent = "Play tone";
   dirty = true;
 };
+
+// -------------------------------------------------------------------- key
+
+/** The hand key: a straight key on Space or the button, or two paddles on the arrow keys. */
+const keyer = new Keyer(1200 / 8, "straight");
+const liveKey = new LiveKey(keyer, { gain: 0.15 });
+liveKey.onChange = () => {
+  dirty = true;
+};
+/** Local reading of what the operator keyed, independent of the decoder above. */
+const sent = { dec: new MorseDecoder(), index: 0, lastT: null, lastOn: false };
+const KEY_HELP = {
+  straight: "Hold <b>Space</b> or the button: the tone sounds while it is held.",
+  paddle: "<b>&larr;</b> sends dits and <b>&rarr;</b> sends dahs at the encoder speed; hold to repeat, hold both to alternate.",
+};
+/** Keyboard codes: [mode the key belongs to, paddle or null for the straight key]. */
+const KEY_CODES = { Space: ["straight", null], ArrowLeft: ["paddle", "dit"], ArrowRight: ["paddle", "dah"] };
+
+function ensureLiveKey() {
+  try {
+    const ac = ensureContext();
+    if (!liveKey.running) liveKey.start(ac, state.f0);
+    syncPlayerFeed();
+    return true;
+  } catch (err) {
+    showMessage(`The key needs Web Audio: ${err.message}`);
+    return false;
+  }
+}
+
+function setKeyMode(mode) {
+  liveKey.setMode(mode);
+  const paddle = mode === "paddle";
+  el.keyStraight.setAttribute("aria-pressed", String(!paddle));
+  el.keyPaddle.setAttribute("aria-pressed", String(paddle));
+  el.keypadStraight.hidden = paddle;
+  el.keypadPaddle.hidden = !paddle;
+  el.keyHelp.innerHTML = KEY_HELP[mode];
+  for (const b of [el.keyBtn, el.ditBtn, el.dahBtn]) b.classList.remove("down");
+  dirty = true;
+}
+
+function updateKeyReadouts() {
+  const T = 1200 / encoder.wpm;
+  el.keySpeed.innerHTML = `${encoder.wpm}<small>WPM</small>`;
+  el.keyDit.textContent = `${Math.round(T)} · ${Math.round(3 * T)} ms`;
+}
+
+function isTypingTarget(target) {
+  if (!target || !target.tagName) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || Boolean(target.isContentEditable);
+}
+
+/** Keyboard key or paddle: Space in single-key mode, the arrows in two-key mode. */
+function onKeyboard(e, down) {
+  const spec = KEY_CODES[e.code];
+  if (!spec || isTypingTarget(e.target)) return;
+  const [mode, paddle] = spec;
+  if (keyer.mode !== mode) return;
+  e.preventDefault();
+  if (down && e.repeat) return;
+  if (down && !ensureLiveKey()) return;
+  if (!liveKey.running) return;
+  if (mode === "straight") {
+    if (down) liveKey.keyDown();
+    else liveKey.keyUp();
+    el.keyBtn.classList.toggle("down", down);
+  } else {
+    if (down) liveKey.paddleDown(paddle);
+    else liveKey.paddleUp(paddle);
+    (paddle === "dit" ? el.ditBtn : el.dahBtn).classList.toggle("down", down);
+  }
+  dirty = true;
+}
+
+/** Mouse and touch on a key button: press and hold. */
+function bindKeyButton(btn, onDown, onUp) {
+  const release = () => {
+    if (!btn.classList.contains("down")) return;
+    btn.classList.remove("down");
+    onUp();
+    dirty = true;
+  };
+  btn.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    if (!ensureLiveKey()) return;
+    btn.classList.add("down");
+    try {
+      btn.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture is a nicety */
+    }
+    onDown();
+    dirty = true;
+  });
+  btn.addEventListener("pointerup", release);
+  btn.addEventListener("pointercancel", release);
+  btn.addEventListener("lostpointercapture", release);
+  btn.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+function releaseKeys() {
+  if (liveKey.running) liveKey.releaseAll();
+  for (const b of [el.keyBtn, el.ditBtn, el.dahBtn]) b.classList.remove("down");
+  dirty = true;
+}
+
+/** Turn new keyer transitions into runs for the local Sent decoder. */
+function trackSent(nowMs) {
+  const { items, index } = keyer.transitionsSince(sent.index);
+  sent.index = index;
+  for (const [t, on] of items) {
+    if (sent.lastT !== null && t > sent.lastT) {
+      sent.dec.feed(new Run(sent.lastOn, Math.max(1, Math.round((t - sent.lastT) / 10))));
+    }
+    sent.lastT = t;
+    sent.lastOn = on;
+  }
+  if (sent.lastT !== null && !sent.lastOn) sent.dec.idle(nowMs - sent.lastT);
+}
+
+function clearSent() {
+  sent.dec.reset();
+  sent.lastT = null;
+  sent.lastOn = false;
+  sent.index = keyer.transitionCount;
+  dirty = true;
+}
+
+function updateKeyDom() {
+  const on = liveKey.running && liveKey.isOn();
+  el.keyPill.className = "pill" + (on ? " on" : "");
+  el.keyPill.innerHTML = `<i></i>${on ? "SENDING" : "SILENT"}`;
+  if (liveKey.running) trackSent(liveKey.nowMs);
+  const pendingSymbols = sent.dec.pendingCount ? sent.dec.provisional : sent.dec.buffer;
+  const shown = pendingSymbols.replace(/\./g, "·").replace(/-/g, "−");
+  const text = sent.dec.text.length > 60 ? `…${sent.dec.text.slice(-60)}` : sent.dec.text;
+  el.sentOut.innerHTML = escapeHtml(text) + (shown ? `<span class="sep"> ${shown}</span>` : "") || "&nbsp;";
+  if (on) dirty = true;
+}
 
 // ------------------------------------------------------------ DOM readouts
 
@@ -1198,6 +1351,7 @@ function updateDom() {
   el.clockV.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   const dropped = state.dropped + Math.floor(state.skippedFrames / state.blockSize);
   el.dropV.textContent = `${dropped} dropped${state.badBlocks ? ` · ${state.badBlocks} bad` : ""}`;
+  updateKeyDom();
 }
 
 function drawAll() {
@@ -1288,6 +1442,16 @@ function wire() {
   });
   el.encPlay.addEventListener("click", togglePlay);
   el.encFeed.addEventListener("change", syncPlayerFeed);
+
+  el.keyStraight.addEventListener("click", () => setKeyMode("straight"));
+  el.keyPaddle.addEventListener("click", () => setKeyMode("paddle"));
+  bindKeyButton(el.keyBtn, () => liveKey.keyDown(), () => liveKey.keyUp());
+  bindKeyButton(el.ditBtn, () => liveKey.paddleDown("dit"), () => liveKey.paddleUp("dit"));
+  bindKeyButton(el.dahBtn, () => liveKey.paddleDown("dah"), () => liveKey.paddleUp("dah"));
+  window.addEventListener("keydown", (e) => onKeyboard(e, true));
+  window.addEventListener("keyup", (e) => onKeyboard(e, false));
+  window.addEventListener("blur", releaseKeys);
+  el.sentClear.addEventListener("click", clearSent);
   el.encCopy.addEventListener("click", () => {
     const done = () => {
       el.encCopy.textContent = "Copied";
@@ -1347,6 +1511,7 @@ function init() {
   el.noteBar.hidden = true; // applyFrequency never fails here, but keep the bar quiet on load
   setSpeedMode(false);
   buildEncoding();
+  setKeyMode("straight");
   wire();
   updateControls();
   updateStatus();

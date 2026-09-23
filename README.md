@@ -21,6 +21,15 @@ the package on any platform with Python, or open the browser version. The
 desktop app is the reference implementation and the one to use when the
 browser only receives a processed microphone signal (Firefox on Windows).
 
+## Send Morse by hand
+
+Both apps have a Key strip. **Single key**: hold Space or the big button and
+the tone sounds while held, like a straight key. **Two keys**: the left arrow
+sends dits and the right arrow dahs, timed at the encoder speed and repeating
+while held, like an electronic keyer; holding both alternates and a tap during
+an element is remembered. The Sent line reads back what you keyed; with Feed
+the decoder on and the decoder listening, the decoder reads it too.
+
 ## Download (Windows, no Python needed)
 
 Get `morse-console-windows-x64.zip` from the

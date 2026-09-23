@@ -205,6 +205,30 @@ has a wide margin. Before the signal-referenced release was added, the 30 ms
 row failed at 12 WPM and above whenever the tone was 46 dB or more above the
 noise.
 
+## 8b. Hand key (added 2026-09-22)
+
+Both apps gained a Key strip so the operator can send Morse from the
+computer: a single key (Space, or a press-and-hold button) that behaves like
+a straight key, and a two-key setup (left arrow dits, right arrow dahs) that
+behaves like an electronic keyer: each press sends one correctly timed
+element at the encoder speed, repeats while held, holding both alternates,
+and a tap during an element is remembered. The tone reaches the speakers
+and, with Feed the decoder on, the decoder itself, so the page doubles as a
+practice tool; a Sent line reads the operator's keying back even when the
+decoder is not listening. The timing state machine is shared logic
+(`morse/keyer.py`, `web/js/keyer.js`), tested in both languages.
+
+Candidate enhancements noted at the same time, not built:
+
+- A practice mode: show a word or call sign, key it, score against the
+  decoder's reading and measure speed and rhythm errors.
+- Farnsworth timing for the encoder (characters at one speed, gaps at a
+  slower one), the standard way to learn by ear.
+- Configurable key bindings and a sidetone pitch separate from the beeper
+  frequency.
+- Export of the decoded log with timestamps.
+- Keyer weighting and mode variants (iambic A and B, bug mode).
+
 ## 9. Risks
 
 - **Beeper too quiet or too far.** The loopback used the laptop's own

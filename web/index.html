@@ -168,6 +168,41 @@
       </div>
     </section>
 
+    <section class="encode keystrip" aria-label="Key Morse by hand">
+      <header>Key <span>· send Morse yourself with the keyboard or the mouse; the decoder reads it back</span><span class="tag">E</span></header>
+      <div class="enc-body">
+        <div class="enc-left">
+          <div class="enc-row">
+            <div class="field"><label>Setup</label>
+              <div class="seg" role="group" aria-label="Key setup">
+                <button id="keyStraight" aria-pressed="true" title="One key: the tone sounds while it is held">Single key</button>
+                <button id="keyPaddle" aria-pressed="false" title="Two keys: dits on the left, dahs on the right, timed for you">Two keys</button>
+              </div>
+            </div>
+            <span class="pill" id="keyPill"><i></i>SILENT</span>
+            <span class="tip keyhelp" id="keyHelp">Hold <b>Space</b> or the button: the tone sounds while it is held.</span>
+          </div>
+          <div class="keypad" id="keypadStraight">
+            <button class="ctl key big" id="keyBtn" title="Hold to send">Key<small>Space</small></button>
+          </div>
+          <div class="keypad" id="keypadPaddle" hidden>
+            <button class="ctl key big" id="ditBtn" title="Dit: hold to repeat">Dit<small>&larr; left arrow</small></button>
+            <button class="ctl key big" id="dahBtn" title="Dah: hold to repeat">Dah<small>&rarr; right arrow</small></button>
+          </div>
+          <div class="enc-row sentrow">
+            <span class="k-label">Sent</span>
+            <span class="enc-out mono sent" id="sentOut" aria-live="polite">&nbsp;</span>
+            <button class="ctl" id="sentClear" title="Clear the sent text">Clear</button>
+          </div>
+        </div>
+        <div class="enc-right readouts">
+          <div class="ro"><span class="k">Speed</span><span class="v mono" id="keySpeed">8<small>WPM</small></span></div>
+          <div class="ro"><span class="k">Dit · dah</span><span class="v mono" id="keyDit">150 · 450 ms</span></div>
+          <div class="tip">Two keys work like an electronic keyer: each press sends one correctly timed element at the encoder speed, repeats while held, holding both alternates, and a tap during an element is remembered. <b>Sent</b> is read from your keying itself; with <b>Feed the decoder</b> on and the decoder listening, the decoder above reads it too.</div>
+        </div>
+      </div>
+    </section>
+
     <div class="statusbar mono">
       <span><span class="dot" id="stateDot">○</span> <span id="stateV">Ready — press Start</span></span>
       <span id="blockV">10 ms blocks</span>
@@ -197,6 +232,7 @@
     <div class="note"><span class="tag">B</span><div><h3>Tone power and ON/OFF strip</h3><p>Energy at the tone frequency, one point per 10 ms, scrolling over the last 10 seconds. The dashed pair is the hysteresis threshold, drawn from the tracked floor and signal. The strip beneath is the detector's verdict, the tape a Morse operator would read.</p></div></div>
     <div class="note"><span class="tag">C</span><div><h3>Decoded text and timing</h3><p>The letter being keyed builds up as dots and dashes and is committed at the next letter gap. On the right, the live estimates that drive the decoder: dit, dah, letter gap and the reverb offset, plus a histogram of recent mark lengths that should show two clusters.</p></div></div>
     <div class="note"><span class="tag">D</span><div><h3>Encode</h3><p>Type English, read the Morse. Letters are separated by a space and words by a slash. The bar underneath is the keying guide: marks and gaps drawn to scale at the chosen speed, with each letter labelled, so you can follow it while pressing the button. Play keys the tone through the speakers and runs a playhead along the guide.</p></div></div>
+    <div class="note"><span class="tag">E</span><div><h3>Key</h3><p>Send Morse yourself. Single key: hold Space or the big button and the tone sounds while held, exactly like a straight key. Two keys: the left arrow sends dits and the right arrow dahs, timed at the encoder speed and repeating while held, like an electronic keyer. The Sent line reads back what you keyed even when the decoder is not listening.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>

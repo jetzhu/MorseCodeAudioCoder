@@ -425,6 +425,10 @@ web/js/decoder.js         class MorseDecoder({wpm, adaptive, window}) — feed(r
                           reset(), ditMs, offsetMs, wpm, buffer, text, letterCount, unknownCount
 web/js/player.js          buildTiming(text, wpm) -> [{on, ms}], layoutGuideLabels(letters, xOf, widthOf) -> [{ch, x}],
                           class TonePlayer(audioContext) { play(timing, f0, gain), stop(), onProgress, addOutput(node), removeOutput(node), clearOutputs(), outputs }
+web/js/keyer.js           class Keyer (port of morse/keyer.py) and class LiveKey(keyer, {gain}) { start(audioContext, f0),
+                          stop(), keyDown(), keyUp(), paddleDown(w), paddleUp(w), releaseAll(), setMode(m), setSpeed(ditMs),
+                          setFrequency(f0), isOn(), nowMs, addOutput(node), removeOutput(node), outputs, onChange }:
+                          a persistent oscillator whose gain is automated with setTargetAtTime on the AudioContext clock
 web/js/worklet.js         AudioWorkletProcessor 'block-meter': accumulates blocks of round(sampleRate/100) samples,
                           posts {rmsDb, powerDb, blockIndex}; accepts {f0} messages
 web/js/audio.js           class MicInput { static listDevices(); start(deviceId, onBlock); stop(); bus (GainNode: the input of the analysis chain); analyser (AnalyserNode 2048);
@@ -455,6 +459,15 @@ Behavioural requirements
   `decoder.provisional` dimmed with the hint "estimating speed…". In Auto
   mode the disabled speed field follows the live estimate once
   `timingReady`, so switching to Manual starts from the measured speed.
+- Key strip (section E, 2026-09-22): Single key (Space or a press-and-hold
+  button: tone while held) or Two keys (left arrow dits, right arrow dahs,
+  at the encoder speed, repeating while held, both alternate, a tap during an
+  element is remembered). Keyboard events are ignored while an input has
+  focus and on auto-repeat; window blur releases everything. The tone goes
+  to the speakers and, with Feed the decoder on while listening, to the
+  decoder's input bus like Play does. A Sent line decodes the operator's own
+  keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
+  log) with a Clear button.
 - Keying-guide labels: every letter is labelled (`layoutGuideLabels`); only a
   label that would overlap its predecessor is skipped. Speed inputs accept
   2 to 40 WPM.
@@ -510,6 +523,49 @@ packaging/morse-console.spec      PyInstaller spec: entry morse/__main__.py (add
 
 `morse.app.main(argv=None) -> int` must exist and be the single entry point.
 
+## morse/keyer.py (2026-09-22)
+
+A Morse key worked by hand, in two parts so the timing can be tested without
+audio; mirrored by `web/js/keyer.js`.
+
+```python
+class Keyer:                      # pure state machine; all times are ms on one caller-chosen clock
+    def __init__(self, dit_ms: float = 150.0, mode: Literal["straight", "paddle"] = "straight"): ...
+    def set_speed(self, dit_ms: float) -> None
+    def set_mode(self, mode, t: float) -> list[tuple[float, bool]]   # releases everything, ends a sounding tone
+    def release_all(self, t) -> list[tuple[float, bool]]             # drops edges logged ahead of t, then OFF at t
+    def key_down(self, t) / key_up(self, t) -> list[tuple[float, bool]]        # straight key
+    def paddle_down(self, which: Literal["dit", "dah"], t) / paddle_up(which, t)  # paddles
+    def tick(self, t) -> list[tuple[float, bool]]   # paddle mode: start the next element when its time comes
+    next_wakeup_ms: float | None                    # when tick() next has a decision to make
+    def state_at(self, t) -> bool
+    def transitions_since(self, index) -> tuple[list[tuple[float, bool]], int]
+    def transitions_in(self, t0, t1) -> list[tuple[float, bool]]
+    transition_count: int
+
+def envelope(transitions, initial: bool, t0_ms, n, fs, ramp_ms=3.0) -> np.ndarray   # 0..1 float32 with linear ramps
+
+class LiveKey:                    # real-time tone through a sounddevice OutputStream (lazy import)
+    def __init__(self, keyer, f0=2491.0, fs=48000, device=None, amplitude=0.3, ramp_ms=3.0, block_size=480): ...
+    def start(self) / stop(self); running: bool; def now_ms(self) -> float   # the keyer clock: ms since start
+    def key_down(self) / key_up(self) / paddle_down(which) / paddle_up(which) / release_all(self)
+    def set_mode(mode) / set_speed(dit_ms) / set_frequency(f0); def is_on(self) -> bool
+    def transitions_since(self, index)              # thread-safe
+    def feed_block(self, t0_ms, n) -> np.ndarray    # the key's tone for a time window, for the decoder feed
+```
+
+Semantics. Straight: the tone follows the key. Paddle: an electronic keyer.
+`paddle_down` while idle starts an element at once (`dit_ms` or `3 dit_ms`)
+and logs both its edges; while an element or its trailing one-dit gap is
+running, the other paddle is remembered and sent next. At the gap end
+`tick` starts the next element when a paddle is held (both held alternate,
+memory first), else goes idle; a tick at the element end only opens the
+gap. Releasing a paddle never cuts an element short; `release_all` does.
+The log is bounded (4000) and never out of time order. `LiveKey`'s stream
+callback advances the keyer with the stream clock (sample-accurate elements)
+and renders the envelope with 3 ms ramps; presses from the UI thread are
+stamped with `now_ms()`; one lock guards every keyer call.
+
 ## morse/ui.py (milestone M7)
 
 `run_ui(args) -> int`. pyqtgraph + PySide6, layout per the approved mock
@@ -540,6 +596,12 @@ widget. Design detail:
   `MorseDecoder.adopt_timing`. In Auto mode the disabled speed spin follows the
   live estimate once `timing_ready`; while runs are held back the pending-letter
   label shows `provisional` dimmed with the hint "estimating speed…".
+- Key strip (section E): the same controls and behaviour as the web page.
+  Space, Left and Right are handled in `keyPressEvent`/`keyReleaseEvent` when
+  no text field has focus; the big buttons take no keyboard focus. The
+  `LiveKey` output stream opens on first use. With Feed the decoder on, each
+  input block is stamped with the key clock at capture and `LiveKey.feed_block`
+  mixes the key's tone into it, so the pipeline decodes the operator's keying.
 - Status bar: listening state, block size, dropped blocks, elapsed time.
 
 A 30 Hz QTimer drains `AudioInput` and feeds `Pipeline`.
