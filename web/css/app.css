@@ -246,7 +246,7 @@ button.ctl.start.running { background: var(--panel); border-color: var(--ink-3);
   width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--panel);
 }
 .enc-body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
-.enc-left { padding: 8px 14px 12px; display: grid; gap: 8px; min-width: 0; }
+.enc-left { padding: 8px 14px 12px; display: grid; gap: 8px; min-width: 0; align-content: start; }
 .enc-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .enc-row > .field, .enc-row > button { flex: 0 0 auto; }
 /* The message gets a full-width line of its own, so a long text stays readable and
