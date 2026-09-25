@@ -374,3 +374,20 @@ Section G, a Morse code chart built from the shared table in both apps
 (v0.1.11): collapsed by default, lit by the letter in progress, click to hear.
 Chosen over a separate chart page (no live highlight) and over extending the
 Practice strip's Show the code (covers only the current target).
+
+## Light: a hearing-impaired user, and two phones talking by light (2026-09-25)
+
+Decided with the user: both Android and iPhone matter; the main scenario is
+two phones each sending and receiving by light; browser first. Steps:
+1. Channels (Listen with / Send with, any combination, all on by default),
+   the signal lamp, full-screen light behind a photosensitivity notice,
+   vibration on Android, and a handset layout on the same URL. Built
+   2026-09-25 (v0.1.13).
+2. Camera as a listen source: preview, tap the light to track, brightness
+   fed to the existing detector and decoder at the frame rate (about 30 Hz,
+   which caps light decoding near 10 to 12 WPM); synthetic-frame tests.
+3. Torch on Android Chrome behind capability detection, capped at 8 WPM.
+4. A link check between two phones (one sends a known word, the other
+   grades it, reusing the practice scoring).
+Desktop: the lamp and full-screen window in step 1; a USB-serial DTR/RTS
+key line would be the way to drive an external lamp or a rig later.

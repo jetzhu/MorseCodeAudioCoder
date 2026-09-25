@@ -469,3 +469,22 @@ def test_livekey_sidetone_goes_to_the_speakers_and_f0_to_the_feed(monkeypatch):
         LiveKey(Keyer(T), f0=1000.0, sidetone_hz=-1.0)
     assert "sidetone=700" in repr(lk)
     lk.stop()
+
+
+def test_livekey_speakers_off_silences_the_stream_but_not_the_feed(monkeypatch):
+    fake = install_fake_sd(monkeypatch)
+    lk = LiveKey(Keyer(T), f0=1000.0, fs=48000, amplitude=0.3)
+    lk.set_speakers(False)
+    lk.start()
+    stream = fake.streams[0]  # type: ignore[attr-defined]
+    lk.key_down()
+    out = np.zeros((480, 1), dtype=np.float32)
+    for _ in range(3):
+        stream.callback(out, 480, None, None)
+    assert np.max(np.abs(out)) == 0.0
+    assert np.max(np.abs(lk.feed_block(lk.now_ms(), 480))) == pytest.approx(0.3, abs=0.02)
+    lk.set_speakers(True)
+    for _ in range(3):
+        stream.callback(out, 480, None, None)
+    assert np.max(np.abs(out)) == pytest.approx(0.3, abs=0.02)
+    lk.stop()

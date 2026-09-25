@@ -190,6 +190,11 @@
       <span class="name">Beeper Morse Console</span>
       <span>—</span>
       <span class="mono" id="titleDev">microphone closed</span>
+      <span class="viewswitch seg" role="group" aria-label="Layout">
+        <button id="viewDesktop" type="button" aria-pressed="true" title="The full console">Desktop</button>
+        <button id="viewHandset" type="button" aria-pressed="false" title="A compact layout for phones: lamp, key, text">Handset</button>
+      </span>
+      <button class="ctl more" id="moreBtn" type="button" aria-expanded="false" title="Show the settings, practice and chart">More</button>
     </div>
 
     <div class="toolbar">
@@ -227,6 +232,20 @@
       <button class="ctl" id="saveBtn" disabled title="Write the last 30 seconds of raw input to a WAV file">Save 30 s</button>
       <button class="ctl" id="logBtn" disabled title="Download the decoded text with the time each word arrived">Download log</button>
       <button class="ctl" id="clearBtn" title="Clear the decoded text; timing estimates are kept">Clear text</button>
+    </div>
+
+    <div class="chipbar" id="channelBar" aria-label="Channels">
+      <div class="chipgroup" role="group" aria-label="Listen with"><span class="chiplabel">Listen with</span>
+        <button class="chip" id="chipMic" type="button" aria-pressed="true" title="Decode what the microphone hears">Microphone</button>
+        <button class="chip" id="chipCamera" type="button" aria-pressed="false" disabled title="Decode a flashing light through the camera: next release">Camera</button>
+      </div>
+      <div class="chipgroup" role="group" aria-label="Send with"><span class="chiplabel">Send with</span>
+        <button class="chip" id="chipAudio" type="button" aria-pressed="true" title="Play and the key sound through the speakers">Audio</button>
+        <button class="chip" id="chipLight" type="button" aria-pressed="true" title="Play and the key flash the signal lamp (or the whole screen)">Screen light</button>
+        <button class="chip" id="chipTorch" type="button" aria-pressed="false" disabled title="Flash the phone's torch: next release (Android Chrome)">Torch</button>
+        <button class="chip" id="chipVibrate" type="button" aria-pressed="true" title="Play and the key vibrate the phone (Android)">Vibration</button>
+      </div>
+      <button class="ctl" id="lightFullBtn" type="button" title="Turn the whole screen into the signal lamp; tap to leave">Full-screen light</button>
     </div>
 
     <div class="msgbar error" id="msgBar" role="alert" hidden>
@@ -306,6 +325,11 @@
           <div class="ro"><span class="k">Speed</span><span class="v mono" id="wpmV">—<small>WPM</small></span></div>
           <div class="ro"><span class="k">Letters</span><span class="v mono" id="cntV">0</span></div>
           <div class="ro"><span class="k">Unknown</span><span class="v mono" id="unkV">0</span></div>
+        </div>
+        <div class="block lampblock">
+          <h4>Signal lamp</h4>
+          <div class="lampwrap"><div class="lamp" role="img" aria-label="Signal lamp: ring while receiving, fill while sending"></div></div>
+          <div class="eyebrow" style="margin-top:6px">Ring: receiving · Fill: sending</div>
         </div>
         <div class="block tip">
           Threshold and speed adapt on their own. Turn <b>Manual</b> on if the keying is very irregular.
@@ -514,6 +538,7 @@
     <div class="note"><span class="tag">E</span><div><h3>Key</h3><p>Send Morse yourself. Single key: hold Space or the big button and the tone sounds while held, exactly like a straight key. Two keys: the left arrow sends dits and the right arrow dahs, timed at the encoder speed and repeating while held, like an electronic keyer, in iambic mode A or B. Bug: automatic dits, hand-made dahs, like a Vibroplex. Dah ratio (dits per dah) and weight (longer marks, shorter spaces) shape the elements. Change key under a button picks any other keyboard key, and the choice is kept in this browser. The sidetone is the pitch you hear (600 Hz by default, easier on the ear than a 2.5 kHz beeper); the decoder is always fed the beeper frequency. The Sent line reads back what you keyed even when the decoder is not listening.</p></div></div>
     <div class="note"><span class="tag">F</span><div><h3>Practice</h3><p>Pick a drill, press Next target, key the word with the Key strip. When the Sent line matches, the target is marked correct; otherwise press Check to see the edit distance, your speed and how far your marks and gaps sit from the ideal proportions. Show the code reveals the dots and dashes while you learn.</p></div></div>
     <div class="note"><span class="tag">G</span><div><h3>Reference</h3><p>A Morse code chart built from the same table the decoder and encoder use: letters, digits and punctuation with their dots and dashes. Open it with Show chart. As you key, or as the decoder builds a letter, every character the dots and dashes so far could still become lights up and the exact match stands out, so you can see where a letter is heading. Click a character to hear it at the encoder speed.</p></div></div>
+    <div class="note"><span class="tag">•</span><div><h3>Listen with, Send with</h3><p>Choose any combination of channels. Listening: the microphone now, the camera in a coming release. Sending: audio through the speakers, the signal lamp on screen (or the whole screen with Full-screen light, for sending across a room), the phone's vibration motor on Android, and the torch in a coming release. Only selected channels take part, everything a device supports starts selected, and the choice is remembered. The lamp shows an amber ring while a mark is being received and a white fill while one is being sent, so a hearing-impaired person can follow both directions. <b>Handset</b> in the title bar switches to a compact layout for phones: lamp, key and text, with the rest behind More.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>
@@ -583,6 +608,15 @@
     Chrome or Edge recommended. Source and issues: <a href="https://github.com/jetzhu/MorseCodeAudioCoder">github.com/jetzhu/MorseCodeAudioCoder</a>.
     The <a href="mock.html">design mock</a> shows the same window on simulated audio.
     <a class="star" id="starLink" href="https://github.com/jetzhu/MorseCodeAudioCoder" target="_blank" rel="noopener">★ Star on GitHub<span class="starcount" data-starcount></span></a>
+  </div>
+</div>
+
+<div class="lightfull" id="lightFull" hidden role="img" aria-label="Full-screen signal lamp; tap to leave"><span class="lightfull-hint">Tap anywhere to leave</span></div>
+<div class="modal" id="flashNotice" hidden role="dialog" aria-modal="true" aria-labelledby="flashTitle">
+  <div class="modalbox">
+    <h3 id="flashTitle">The whole screen will flash</h3>
+    <p>Full-screen light turns the display on and off at Morse speed, several times a second. Flashing light can trigger seizures in people with photosensitive epilepsy. Point the screen away from anyone who may be affected, and leave with a tap anywhere.</p>
+    <div class="modalrow"><button class="ctl" id="flashCancel" type="button">Cancel</button><button class="ctl primary" id="flashOk" type="button">I understand, show it</button></div>
   </div>
 </div>
 

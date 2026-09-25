@@ -122,6 +122,79 @@ a { color: var(--spec); }
 .titlebar .dots { display: inline-flex; gap: 6px; margin-right: 4px; }
 .titlebar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: block; }
 .titlebar .name { font-weight: 600; color: var(--ink); }
+.titlebar .viewswitch { margin-left: auto; }
+.titlebar .more { display: none; height: 24px; font-size: 12px; }
+
+/* ---------- channels ---------- */
+.chipbar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.chipgroup { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.chiplabel { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); margin-right: 4px; }
+.chip {
+  height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+}
+.chip::before { content: "○ "; color: var(--ink-3); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.chip[aria-pressed="true"]::before { content: "✓ "; color: inherit; }
+.chip:disabled { opacity: 0.45; cursor: default; }
+.chip:not(:disabled):hover { border-color: var(--ink-3); }
+
+/* ---------- signal lamp ---------- */
+.lampwrap { display: grid; place-items: center; padding: 6px 0; }
+.lamp {
+  width: 72px; height: 72px; border-radius: 50%; background: var(--panel-2); border: 6px solid var(--line);
+  transition: background 40ms linear, border-color 40ms linear, box-shadow 40ms linear;
+}
+.lamp.rx { border-color: var(--on); box-shadow: 0 0 0 4px var(--trace-fill); }
+.lamp.tx { background: #fff; box-shadow: 0 0 22px 6px rgba(255, 255, 255, 0.75); }
+.lamp.rx.tx { box-shadow: 0 0 0 4px var(--trace-fill), 0 0 22px 6px rgba(255, 255, 255, 0.75); }
+.lightfull { position: fixed; inset: 0; z-index: 50; background: #000; cursor: pointer; }
+.lightfull.rx { box-shadow: inset 0 0 0 28px var(--on); }
+.lightfull.tx { background: #fff; }
+.lightfull-hint { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; color: #777; font-size: 13px; pointer-events: none; }
+.lightfull.tx .lightfull-hint { color: #999; }
+.modal { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.5); display: grid; place-items: center; padding: 16px; }
+.modal[hidden] { display: none; }
+.modalbox { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; max-width: 460px; padding: 18px 20px; box-shadow: var(--shadow); }
+.modalbox h3 { margin: 0 0 8px; font-size: 16px; }
+.modalbox p { margin: 0 0 14px; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.modalrow { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ---------- handset layout ---------- */
+body.view-handset .page { padding: 6px 6px 24px; gap: 10px; max-width: none; }
+body.view-handset .intro, body.view-handset .dl, body.view-handset .notes, body.view-handset .about { display: none; }
+body.view-handset .foot { font-size: 12px; }
+body.view-handset .win { border-radius: 6px; }
+body.view-handset .titlebar > span:not(.name):not(.viewswitch) { display: none; }
+body.view-handset .titlebar .more { display: inline-block; }
+body.view-handset .toolbar .field:not(:has(#speedLabel)) { display: none; }
+body.view-handset .toolbar #pauseBtn, body.view-handset .toolbar #saveBtn, body.view-handset .toolbar #logBtn { display: none; }
+body.view-handset .body { display: flex; flex-direction: column; }
+body.view-handset .main, body.view-handset .rail { display: contents; }
+body.view-handset .main > .panel:nth-child(1), body.view-handset .main > .panel:nth-child(2),
+body.view-handset #powerPlot, body.view-handset .main > section[aria-label="Spectrum"] { display: none !important; }
+body.view-handset .chipbar { gap: 8px 18px; }
+body.view-handset .chipgroup { flex: 1 1 100%; min-width: 0; }
+body.view-handset .rail > .block:not(.lampblock) { display: none; }
+body.view-handset .lampblock { order: 1; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+body.view-handset .lampblock h4 { text-align: center; }
+body.view-handset .lampwrap { padding: 10px 0; }
+body.view-handset .lamp { width: min(58vw, 300px); height: min(58vw, 300px); border-width: 10px; }
+body.view-handset .lampblock .eyebrow { text-align: center; }
+body.view-handset .main > .panel:nth-child(3) { order: 2; min-height: 110px; }
+body.view-handset .decoded { grid-template-columns: 1fr; min-height: 0; }
+body.view-handset .timing { display: none; }
+body.view-handset .text { font-size: 22px; }
+body.view-handset .enc-right { display: none; }
+body.view-handset:not(.more-open) .enc-controls > :not(#encPlay) { display: none; }
+body.view-handset .enc-guide { height: 30px; }
+body.view-handset .keystrip .keyhelp, body.view-handset .keystrip #keyReset, body.view-handset .keystrip .rebind,
+body.view-handset:not(.more-open) .keystrip .keyerrow, body.view-handset:not(.more-open) .keystrip .field:has(#keySidetone) { display: none; }
+body.view-handset .keypad { width: 100%; }
+body.view-handset .keycol { flex: 1; }
+body.view-handset button.ctl.key.big { min-width: 0; width: 100%; height: 96px; font-size: 20px; }
+body.view-handset:not(.more-open) .practice, body.view-handset:not(.more-open) .reference { display: none; }
+body.view-handset .statusbar { font-size: 11px; gap: 10px; }
 .toolbar {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2);

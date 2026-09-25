@@ -363,6 +363,8 @@ export class LiveKey {
     this.f0 = 2491;
     /** Pitch the speakers play; null follows `f0`. The decoder feed is always at `f0`. @type {number | null} */
     this.sidetoneHz = null;
+    /** Whether the sidetone reaches the speakers; the feed chain is unaffected. */
+    this.speakers = true;
     /** Speaker chain (sidetone). @type {OscillatorNode | null} */
     this._osc = null;
     /** @type {GainNode | null} */
@@ -503,6 +505,15 @@ export class LiveKey {
     if (this._osc && this.sidetoneHz === null) this._osc.frequency.setValueAtTime(f0, now);
   }
 
+  /** Send the sidetone to the speakers or not. @param {boolean} on */
+  setSpeakers(on) {
+    this.speakers = Boolean(on);
+    if (this._gain && this.audioContext) {
+      const sounding = this.keyer.stateAt(this.nowMs);
+      this._gain.gain.setTargetAtTime(this.speakers && sounding ? this.gain : 0, this.audioContext.currentTime, EDGE_TAU_S);
+    }
+  }
+
   /**
    * Pitch the speakers play; null, 0 or a non-finite value follows `f0`.
    * @param {number | null} hz
@@ -551,7 +562,7 @@ export class LiveKey {
       const ac = this.audioContext;
       for (const [tMs, on] of transitions) {
         const at = Math.max(tMs / 1000, ac.currentTime);
-        this._gain.gain.setTargetAtTime(on ? this.gain : 0, at, EDGE_TAU_S);
+        this._gain.gain.setTargetAtTime(on && this.speakers ? this.gain : 0, at, EDGE_TAU_S);
         if (this._gainFeed) this._gainFeed.gain.setTargetAtTime(on ? this.gain : 0, at, EDGE_TAU_S);
       }
     }

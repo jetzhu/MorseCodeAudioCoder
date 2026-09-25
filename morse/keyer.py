@@ -435,6 +435,8 @@ class LiveKey:
         self.fs = int(fs)
         self.device = device
         self.amplitude = float(amplitude)
+        self.speakers: bool = True
+        """Whether the sidetone reaches the speakers; :meth:`feed_block` is unaffected."""
         self.ramp_ms = float(ramp_ms)
         self.block_size = int(block_size)
         self._lock = threading.Lock()
@@ -524,6 +526,10 @@ class LiveKey:
             raise ValueError(f"f0 must be between 0 and fs/2, got {f0!r}")
         self.f0 = float(f0)
 
+    def set_speakers(self, on: bool) -> None:
+        """Send the sidetone to the speakers or not (takes effect at the next block)."""
+        self.speakers = bool(on)
+
     def set_sidetone(self, hz: float | None) -> None:
         """Pitch the speakers play; None (or 0) follows :attr:`f0`. Takes effect at the next block."""
         if hz is None or float(hz) == 0.0:
@@ -573,7 +579,7 @@ class LiveKey:
             env = self._render_env(t0, frames)
             self._stream_ms = t0 + block_ms
         tone, self._phase_out = self._sine(frames, self._phase_out, self.speaker_hz)
-        outdata[:, 0] = self.amplitude * env * tone
+        outdata[:, 0] = (self.amplitude * env * tone) if self.speakers else 0.0
 
     def feed_block(self, t0_ms: float, n: int) -> np.ndarray:
         """The key's tone for ``n`` samples starting at keyer time ``t0_ms`` (for the decoder feed)."""

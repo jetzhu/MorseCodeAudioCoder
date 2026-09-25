@@ -246,8 +246,11 @@ test("play schedules a sine oscillator with 3 ms ramps at every edge", () => {
     assertClose(osc.stopCalls[0], 1.08 + 0.12 + 0.1);
 
     const gain = ac.gains[0];
+    const speakers = ac.gains[1]; // the speaker branch, muted by setSpeakers(false)
     assert.deepEqual(osc.connectedTo, [gain]);
-    assert.deepEqual(gain.connectedTo, [ac.destination]);
+    assert.deepEqual(gain.connectedTo, [speakers]);
+    assert.deepEqual(speakers.connectedTo, [ac.destination]);
+    assert.equal(speakers.gain.value, 1);
 
     const ev = gain.gain.events;
     assert.equal(ev.length, 5);
@@ -477,7 +480,7 @@ test("TonePlayer extra outputs: registered before play, connected live, removabl
   assert.deepEqual(player.outputs, [bus]);
   player.play(SOS_10WPM, 2491, 0.15);
   const gain = ac.gains[0];
-  assert.ok(gain.connectedTo.includes(ac.destination), "speakers still get the tone");
+  assert.ok(ac.gains[1].connectedTo.includes(ac.destination), "speakers still get the tone, through the speaker gain");
   assert.ok(gain.connectedTo.includes(bus), "the bus gets the tone");
   const late = new FakeNode();
   player.addOutput(late);
@@ -489,7 +492,7 @@ test("TonePlayer extra outputs: registered before play, connected live, removabl
   player.stop();
   player.addOutput(bus);
   player.play(SOS_10WPM, 2491, 0.15);
-  assert.ok(ac.gains[1].connectedTo.includes(bus), "outputs persist across plays");
+  assert.ok(ac.gains[2].connectedTo.includes(bus), "outputs persist across plays (the second play made gains 2 and 3)");
   player.stop();
 });
 
@@ -519,4 +522,21 @@ test("buildTiming with Farnsworth stretches only the gaps between letters", () =
   assert.deepEqual(buildTiming("SOS E", 18, 20), std);
   const guide = buildGuide("SOS E", 18, 5);
   assert.equal(guide.totalMs, timingDurationMs(farns));
+});
+
+test("TonePlayer speakers off and stateAtNow", () => {
+  const ac = new FakeAudioContext({ state: "running" });
+  const player = new TonePlayer(ac);
+  const bus = new FakeNode();
+  player.addOutput(bus);
+  player.setSpeakers(false);
+  player.play(buildTiming("E", 10), 2491); // one 120 ms dit
+  assert.equal(ac.gains[1].gain.value, 0, "the speaker branch starts muted");
+  assert.ok(ac.gains[0].connectedTo.includes(bus), "the feed still gets the tone");
+  ac.currentTime = player.startTime + 0.05;
+  assert.equal(player.stateAtNow(), true);
+  ac.currentTime = player.startTime + 0.13;
+  assert.equal(player.stateAtNow(), false);
+  player.stop();
+  assert.equal(player.stateAtNow(), false);
 });

@@ -474,3 +474,19 @@ test("LiveKey paddle: the element end is scheduled at once and the timer arms fo
   lk.stop();
   assert.equal(lk._timer, null);
 });
+
+test("LiveKey setSpeakers mutes the speaker chain only", () => {
+  const ac = new FakeAC();
+  const lk = new LiveKey(new Keyer(T), { gain: 0.2 });
+  lk.setSpeakers(false);
+  lk.start(ac, 2491);
+  const [g, gFeed] = ac.gains;
+  lk.keyDown();
+  assert.equal(g.gain.events.at(-1).target, 0, "speakers muted");
+  assert.equal(gFeed.gain.events.at(-1).target, 0.2, "the feed still gets the tone");
+  ac.currentTime += 0.01;
+  lk.setSpeakers(true);
+  assert.equal(g.gain.events.at(-1).target, 0.2, "unmuted while the key is down");
+  lk.keyUp();
+  lk.stop();
+});

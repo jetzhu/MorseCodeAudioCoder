@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import time
+
+from PySide6 import QtCore
 import os
 
 # Must be set before anything imports Qt, or the default platform is used.
@@ -669,3 +671,54 @@ def test_star_link_and_one_time_nudge(qapp, window: ui.MainWindow, settings) -> 
         assert "Useful?" not in other.status_star.text()
     finally:
         other.close()
+
+
+def test_channel_chips_and_the_signal_lamp(qapp, window: ui.MainWindow, settings, fake_sd) -> None:
+    from morse.player import build_timing
+
+    assert window.chip_mic.isChecked() and window.chip_audio.isChecked() and window.chip_light.isChecked()
+    assert not window.chips[("send", "torch")].isEnabled() and not window.chips[("listen", "camera")].isEnabled()
+    # Audio off: the key keeps feeding the decoder but the speakers stay silent.
+    window.chip_audio.click()
+    assert not window._send_on("audio")
+    assert '"audio": false' in str(settings.value(ui.SETTINGS_CHANNELS))
+    window._on_key_button(True, None)
+    assert window._livekey is not None and window._livekey.speakers is False
+    window._on_key_button(False, None)
+    window.chip_audio.click()
+    assert window._livekey.speakers is True
+    # The lamp follows sending: a dah of T at 12 WPM lights the fill for 300 ms.
+    window._light_timing = build_timing("T", 12)
+    window._light_t0 = time.monotonic()
+    assert window._send_state_now() is True
+    window._refresh_rail()
+    assert window.lamp.tx is True
+    window.chip_light.click()
+    window._refresh_rail()
+    assert window.lamp.tx is False and not window.light_full_button.isEnabled()
+    window.chip_light.click()
+    window._stop_play()
+    assert window._light_timing is None and window._send_state_now() is False
+    # Microphone off: input blocks are discarded, the decoder stays where it is.
+    before = window.pipeline.elapsed_ms
+    window.chip_mic.click()
+    window.on_tick()
+    assert window.pipeline.elapsed_ms == before
+    window.chip_mic.click()
+    other = ui.make_window(replay_args(), settings=settings)
+    try:
+        assert other._channels == window._channels
+    finally:
+        other.close()
+    # Full-screen lamp: opens once the notice is acknowledged, follows the state, closes on Esc.
+    settings.setValue(ui.SETTINGS_FLASH_NOTICE, "1")
+    window._toggle_light_window()
+    assert window._light_window is not None
+    window._light_timing = build_timing("T", 12)
+    window._light_t0 = time.monotonic()
+    window._refresh_rail()
+    assert window._light_window.tx is True
+    press(window._light_window, QtCore.Qt.Key.Key_Escape)
+    qapp.processEvents()
+    assert window._light_window is None
+    window.stop()

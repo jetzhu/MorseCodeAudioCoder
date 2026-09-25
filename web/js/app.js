@@ -26,6 +26,8 @@ import { DecodedLog, defaultFilename } from "./declog.js";
 import { DEFAULTS as BINDING_DEFAULTS, RESERVED_CODES, actionFor, isDefault as bindingsAreDefault, keyLabel, rebind, sanitize as sanitizeBindings } from "./bindings.js";
 import { Practice, rhythm, score } from "./practice.js";
 import { cellState, chartEntries } from "./reference.js";
+import { sanitize as sanitizeChannels, vibrationPattern } from "./channels.js";
+import { Lamp } from "./light.js";
 import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
@@ -47,9 +49,21 @@ const AUTO_MIN_PROMINENCE_DB = 10;
 const RELEASES_API = "https://api.github.com/repos/jetzhu/MorseCodeAudioCoder/releases/latest";
 const REPO_API = "https://api.github.com/repos/jetzhu/MorseCodeAudioCoder";
 const STORE_STAR_NUDGE = "morse.star.nudged";
+const STORE_CHANNELS = "morse.channels";
+const STORE_VIEW = "morse.view";
+const STORE_FLASH_NOTICE = "morse.light.notice";
 const RELEASES_PAGE = "https://github.com/jetzhu/MorseCodeAudioCoder/releases";
 const REPO_GIT = "https://github.com/jetzhu/MorseCodeAudioCoder.git";
 const STORAGE = { device: "morse.deviceId", f0: "morse.f0", micProc: "morse.micProcessing" };
+
+// ---------------------------------------------------------------- channels
+
+/** What the page listens with and sends with; any combination, remembered. */
+let channels = sanitizeChannels(null);
+/** What this device can do; filled in by initChannels(). */
+const avail = { listen: { mic: false, camera: false }, send: { audio: true, light: true, torch: false, vibrate: false } };
+const listenOn = (k) => Boolean(channels.listen[k] && avail.listen[k]);
+const sendOn = (k) => Boolean(channels.send[k] && avail.send[k]);
 
 // -------------------------------------------------------------------- helpers
 
@@ -88,6 +102,10 @@ const el = {
   chopHint: $("chopHint"), chopDismiss: $("chopDismiss"),
   noteBar: $("noteBar"), noteText: $("noteText"), noteDismiss: $("noteDismiss"),
   starNudge: $("starNudge"), starNudgeLink: $("starNudgeLink"), starNudgeDismiss: $("starNudgeDismiss"),
+  chipMic: $("chipMic"), chipCamera: $("chipCamera"), chipAudio: $("chipAudio"), chipLight: $("chipLight"),
+  chipTorch: $("chipTorch"), chipVibrate: $("chipVibrate"), lightFullBtn: $("lightFullBtn"), lightFull: $("lightFull"),
+  flashNotice: $("flashNotice"), flashOk: $("flashOk"), flashCancel: $("flashCancel"),
+  viewDesktop: $("viewDesktop"), viewHandset: $("viewHandset"), moreBtn: $("moreBtn"),
   f0Label: $("f0Label"), specInfo: $("specInfo"),
   sym: $("symBuf"), hint: $("symHint"), text: $("textOut"),
   dit: $("ditV"), dah: $("dahV"), lgap: $("lgapV"), off: $("offV"),
@@ -359,6 +377,10 @@ function resetStreamState() {
 
 async function startListening() {
   if (state.starting || state.running || !state.supported) return;
+  if (!listenOn("mic")) {
+    showNote("Select a source to listen with (Listen with: Microphone).");
+    return;
+  }
   state.starting = true;
   el.start.disabled = true;
   el.start.textContent = "Starting…";
@@ -592,7 +614,8 @@ function updateControls() {
   const running = state.running;
   el.start.textContent = running ? "Stop" : "Start";
   el.start.classList.toggle("running", running);
-  el.start.disabled = !state.supported || state.starting;
+  el.start.disabled = !state.supported || state.starting || (!running && !listenOn("mic"));
+  el.start.title = !running && !listenOn("mic") ? "Select a source to listen with first" : "Open the microphone and start decoding";
   el.pause.disabled = !running;
   el.auto.disabled = !running;
   el.save.disabled = !(running || (mic && mic.lastDump));
@@ -1219,6 +1242,7 @@ function togglePlay() {
     player.audioContext = ensureContext();
     syncPlayerFeed();
     player.play(encoder.guide.timing, state.f0, 0.15);
+    vibrateTiming(encoder.guide.timing);
     encoder.playheadMs = 0;
     el.encPlay.textContent = "Stop";
     updateMicGate();
@@ -1268,7 +1292,7 @@ function updateMicGate() {
     clearTimeout(micGateTimer);
     micGateTimer = null;
   }
-  if (!mic || !state.running || !el.encFeed.checked) {
+  if (!mic || !state.running || !el.encFeed.checked || !sendOn("audio") || !listenOn("mic")) {
     micGate.reset();
     if (mic) mic.setGate(false);
     return;
@@ -1288,6 +1312,7 @@ player.onEnd = () => {
   ref.playing = false;
   el.encPlay.textContent = "Play tone";
   updateMicGate();
+  stopVibration();
   dirty = true;
 };
 
@@ -1298,8 +1323,146 @@ const keyer = new Keyer(1200 / 8, "straight");
 const liveKey = new LiveKey(keyer, { gain: 0.15 });
 liveKey.onChange = () => {
   updateMicGate();
+  updateKeyVibration();
   dirty = true;
 };
+
+// ------------------------------------------------------- light and vibration
+
+/** The signal lamp on every layout, and the full-screen overlay. */
+const lamp = new Lamp(document.querySelectorAll(".lamp"), el.lightFull);
+
+/** Whether the page is sending a mark right now (Play or the key). */
+function sendingNow() {
+  return (player.playing && player.stateAtNow()) || (liveKey.running && liveKey.isOn());
+}
+
+function updateLamp() {
+  const rx = state.running && !state.paused && listenOn("mic") && detector.state;
+  const tx = sendOn("light") && sendingNow();
+  lamp.setState(rx, tx);
+}
+
+function vibrateTiming(timing) {
+  if (!sendOn("vibrate")) return;
+  try {
+    navigator.vibrate(vibrationPattern(timing));
+  } catch {
+    /* not allowed without a gesture, or unsupported */
+  }
+}
+
+function stopVibration() {
+  if (!avail.send.vibrate) return;
+  try {
+    navigator.vibrate(0);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Follow the hand key: vibrate for the element in progress, stop when it ends. */
+function updateKeyVibration() {
+  if (!sendOn("vibrate") || !liveKey.running) return;
+  const on = liveKey.isOn();
+  try {
+    if (!on) navigator.vibrate(0);
+    else if (keyer.mode === "straight") navigator.vibrate(30000); // until the key is let go
+    else navigator.vibrate(Math.max(10, Math.round((keyer.nextWakeupMs ?? liveKey.nowMs) - liveKey.nowMs)));
+  } catch {
+    /* ignore */
+  }
+}
+
+function requestFullLight() {
+  if (store.get(STORE_FLASH_NOTICE) === "1") {
+    enterFullLight();
+    return;
+  }
+  el.flashNotice.hidden = false;
+  el.flashOk.focus();
+}
+
+function enterFullLight() {
+  el.flashNotice.hidden = true;
+  lamp.enterFull();
+  updateLamp();
+  const root = document.documentElement;
+  if (typeof root.requestFullscreen === "function") root.requestFullscreen().catch(() => {});
+}
+
+function exitFullLight() {
+  lamp.exitFull();
+  if (document.fullscreenElement && typeof document.exitFullscreen === "function") document.exitFullscreen().catch(() => {});
+}
+
+// ----------------------------------------------------------------- channels
+
+function initChannels() {
+  avail.listen.mic = state.supported;
+  avail.send.vibrate = typeof navigator.vibrate === "function";
+  try {
+    channels = sanitizeChannels(JSON.parse(store.get(STORE_CHANNELS) || "null"));
+  } catch {
+    channels = sanitizeChannels(null);
+  }
+  const chips = [
+    ["listen", "mic", el.chipMic], ["listen", "camera", el.chipCamera], ["send", "audio", el.chipAudio],
+    ["send", "light", el.chipLight], ["send", "torch", el.chipTorch], ["send", "vibrate", el.chipVibrate],
+  ];
+  for (const [group, key, chip] of chips) chip.addEventListener("click", () => toggleChannel(group, key));
+  el.chipVibrate.title = avail.send.vibrate ? el.chipVibrate.title : "Vibration: not available on this device";
+  applyChannels(false);
+}
+
+function toggleChannel(group, key) {
+  if (!avail[group][key]) return;
+  channels[group][key] = !channels[group][key];
+  applyChannels(true);
+}
+
+function applyChannels(persist) {
+  if (persist) store.set(STORE_CHANNELS, JSON.stringify(channels));
+  const chips = { mic: el.chipMic, camera: el.chipCamera, audio: el.chipAudio, light: el.chipLight, torch: el.chipTorch, vibrate: el.chipVibrate };
+  for (const [key, chip] of Object.entries(chips)) {
+    const group = key === "mic" || key === "camera" ? "listen" : "send";
+    chip.disabled = !avail[group][key];
+    chip.setAttribute("aria-pressed", String(Boolean(channels[group][key] && avail[group][key])));
+  }
+  player.setSpeakers(sendOn("audio"));
+  liveKey.setSpeakers(sendOn("audio"));
+  if (!sendOn("vibrate")) stopVibration();
+  el.lightFullBtn.disabled = !sendOn("light");
+  if (!sendOn("light") && lamp.fullActive) exitFullLight();
+  updateMicGate();
+  updateControls();
+  updateLamp();
+  dirty = true;
+}
+
+// --------------------------------------------------------------------- view
+
+/** "desktop" or "handset": the full console or the compact phone layout. */
+function setView(view, persist = true) {
+  const handset = view === "handset";
+  document.body.classList.toggle("view-handset", handset);
+  if (!handset) document.body.classList.remove("more-open");
+  el.viewDesktop.setAttribute("aria-pressed", String(!handset));
+  el.viewHandset.setAttribute("aria-pressed", String(handset));
+  if (persist) store.set(STORE_VIEW, handset ? "handset" : "desktop");
+  ref.lastBuffer = null;
+  dirty = true;
+}
+
+function initialView() {
+  const fromUrl = new URLSearchParams(location.search).get("view");
+  if (fromUrl === "handset" || fromUrl === "desktop") return fromUrl;
+  const stored = store.get(STORE_VIEW);
+  if (stored === "handset" || stored === "desktop") return stored;
+  const narrow = matchMedia("(max-width: 700px)").matches;
+  const touch = matchMedia("(pointer: coarse)").matches;
+  return narrow && touch ? "handset" : "desktop";
+}
 /** Local reading of what the operator keyed, independent of the decoder above. */
 const sent = { dec: new MorseDecoder(), index: 0, lastT: null, lastOn: false, /** @type {Run[]} */ runs: [] };
 /** Which keyboard key works the straight key and each paddle; kept in this browser. */
@@ -1459,6 +1622,11 @@ function isTypingTarget(target) {
  */
 function onKeyboard(e, down) {
   if (isTypingTarget(e.target)) return;
+  if (e.code === "Escape" && lamp.fullActive) {
+    if (down) exitFullLight();
+    e.preventDefault();
+    return;
+  }
   if (capture !== null) {
     e.preventDefault();
     if (!down || e.repeat) return;
@@ -1609,7 +1777,9 @@ function playReference(ch) {
     syncPlayerFeed();
     ref.playing = true;
     encoder.playheadMs = null;
-    player.play(buildGuide(ch, encoder.wpm).timing, state.f0, 0.15);
+    const timing = buildGuide(ch, encoder.wpm).timing;
+    player.play(timing, state.f0, 0.15);
+    vibrateTiming(timing);
     el.encPlay.textContent = "Play tone";
     updateMicGate();
   } catch {
@@ -1711,6 +1881,7 @@ function updateKeyDom() {
 // ------------------------------------------------------------ DOM readouts
 
 function updateDom() {
+  updateLamp();
   const cur = detector.currentRun;
   const live = state.running && cur.on ? (cur.ms - decoder.offsetMs < 2 * decoder.ditMs ? "·" : "−") : "";
   // While the speed estimate settles the held-back runs are shown dimmed, as
@@ -1839,6 +2010,27 @@ function wire() {
     el.chopHint.hidden = true;
     state.chopDismissed = true;
   });
+  el.lightFullBtn.addEventListener("click", requestFullLight);
+  el.lightFull.addEventListener("click", exitFullLight);
+  el.flashOk.addEventListener("click", () => {
+    store.set(STORE_FLASH_NOTICE, "1");
+    enterFullLight();
+  });
+  el.flashCancel.addEventListener("click", () => {
+    el.flashNotice.hidden = true;
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && lamp.fullActive) lamp.exitFull();
+  });
+  el.viewDesktop.addEventListener("click", () => setView("desktop"));
+  el.viewHandset.addEventListener("click", () => setView("handset"));
+  el.moreBtn.addEventListener("click", () => {
+    const open = document.body.classList.toggle("more-open");
+    el.moreBtn.setAttribute("aria-expanded", String(open));
+    el.moreBtn.textContent = open ? "Less" : "More";
+    ref.lastBuffer = null;
+    dirty = true;
+  });
   el.starNudgeDismiss.addEventListener("click", endStarNudge);
   el.starNudgeLink.addEventListener("click", endStarNudge);
   loadStarCount();
@@ -1966,6 +2158,8 @@ function init() {
   setKeyMode("straight");
   setPracticeKind("words");
   wire();
+  initChannels();
+  setView(initialView(), false);
   updateControls();
   updateStatus();
   refreshDevices();

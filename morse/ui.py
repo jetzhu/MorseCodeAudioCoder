@@ -55,8 +55,10 @@ from morse.decoder import MorseDecoder
 from morse.dsp import find_tone_frequency, spectrum
 from morse.pipeline import BlockResult, Pipeline, load_wav
 from morse import bindings as keybind
+from morse import channels as chan
 from morse import practice
 from morse import reference
+from morse.channels import timing_state_at
 from morse.keyer import DAH_RATIO_RANGE, WEIGHT_RANGE, Keyer, LiveKey
 from morse.runs import Run
 from morse.player import MIC_GATE_GAIN, MIC_GATE_TAIL_MS, MicGate, TonePlayer, build_timing, farnsworth_gaps, render_tone
@@ -827,6 +829,10 @@ SETTINGS_WEIGHT = "key/weight"
 """QSettings key: weight in percent."""
 SETTINGS_REF_OPEN = "reference/open"
 """QSettings key: whether the Morse chart (section G) is shown."""
+SETTINGS_CHANNELS = "channels"
+"""QSettings key: the Listen with / Send with selection as JSON (see :mod:`morse.channels`)."""
+SETTINGS_FLASH_NOTICE = "light/notice"
+"""QSettings key: the full-screen light's photosensitivity notice has been acknowledged."""
 SETTINGS_STAR_NUDGED = "star/nudged"
 """QSettings key: the one-time request to star the repository has been shown."""
 REPO_URL = "https://github.com/jetzhu/MorseCodeAudioCoder"
@@ -906,6 +912,23 @@ def load_reference_open(settings: QtCore.QSettings) -> bool:
     return str(settings.value(SETTINGS_REF_OPEN, "0")).strip().lower() in ("1", "true")
 
 
+def load_channels(settings: QtCore.QSettings) -> dict[str, dict[str, bool]]:
+    """The channel selection from ``settings``, repaired against the defaults."""
+    raw = settings.value(SETTINGS_CHANNELS, "")
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) and raw else None
+    except ValueError:
+        parsed = None
+    return chan.sanitize(parsed)
+
+
+DESKTOP_AVAILABLE: dict[str, dict[str, bool]] = {
+    "listen": {"mic": True, "camera": False},
+    "send": {"audio": True, "light": True, "torch": False, "vibrate": False},
+}
+"""What the desktop app can do: microphone in; audio and screen light out."""
+
+
 def load_sidetone(settings: QtCore.QSettings) -> int:
     """Sidetone pitch in Hz from ``settings`` (0 = follow the tone), default 600."""
     raw = settings.value(SETTINGS_SIDETONE, DEFAULT_SIDETONE_HZ)
@@ -914,6 +937,83 @@ def load_sidetone(settings: QtCore.QSettings) -> int:
     except (TypeError, ValueError):
         return DEFAULT_SIDETONE_HZ
     return value if 0 <= value <= SIDETONE_MAX_HZ else DEFAULT_SIDETONE_HZ
+
+
+class Lamp(QtWidgets.QWidget):
+    """The signal lamp: an amber ring while a mark is received, a white fill while one is sent."""
+
+    def __init__(self, theme: Theme, size: int = 72, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.theme = theme
+        self.rx = False
+        self.tx = False
+        self.setFixedSize(size + 12, size + 12)
+        self._size = size
+
+    def set_state(self, rx: bool, tx: bool) -> None:
+        rx, tx = bool(rx), bool(tx)
+        if rx == self.rx and tx == self.tx:
+            return
+        self.rx, self.tx = rx, tx
+        self.update()
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        t = self.theme
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        r = QtCore.QRectF(6, 6, self._size, self._size)
+        if self.rx:
+            glow = QtGui.QColor(*t.trace_fill)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(glow)
+            p.drawEllipse(r.adjusted(-5, -5, 5, 5))
+        pen = QtGui.QPen(QtGui.QColor(t.on if self.rx else t.line), max(3, self._size // 10))
+        p.setPen(pen)
+        p.setBrush(QtGui.QColor("#FFFFFF" if self.tx else t.panel2))
+        p.drawEllipse(r.adjusted(3, 3, -3, -3))
+        p.end()
+
+
+class LightWindow(QtWidgets.QWidget):
+    """Full-screen signal lamp for sending across a room: black, white on a mark. Click or Esc leaves."""
+
+    def __init__(self, theme: Theme, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent, Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.theme = theme
+        self.rx = False
+        self.tx = False
+        self.setWindowTitle("Signal lamp")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAutoFillBackground(True)
+
+    def set_state(self, rx: bool, tx: bool) -> None:
+        rx, tx = bool(rx), bool(tx)
+        if rx == self.rx and tx == self.tx:
+            return
+        self.rx, self.tx = rx, tx
+        self.update()
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        p = QtGui.QPainter(self)
+        p.fillRect(self.rect(), QtGui.QColor("#FFFFFF" if self.tx else "#000000"))
+        if self.rx:
+            pen = QtGui.QPen(QtGui.QColor(self.theme.on), 28)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(self.rect().adjusted(14, 14, -14, -14))
+        p.setPen(QtGui.QColor("#777777"))
+        p.drawText(self.rect().adjusted(0, 0, 0, -18), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                   "Click or press Esc to leave")
+        p.end()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        self.close()
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
 
 
 class RefCell(QtWidgets.QFrame):
@@ -1041,6 +1141,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # after), the microphone is turned down in the decoder's input so the
         # speaker echo cannot fill the gaps between marks.
         self._mic_gate = MicGate()
+        # Channels (Listen with / Send with) and the light that follows sending.
+        self._channels = load_channels(self.settings)
+        self._light_timing: list[tuple[bool, float]] | None = None
+        self._light_t0: float = 0.0
+        self._light_window: LightWindow | None = None
         # The hand key (section E): a straight key on Space or the button, or
         # two paddles on the arrow keys. The output stream opens on first use.
         self._iambic: str = load_iambic(self.settings)
@@ -1146,6 +1251,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._build_toolbar(manual_wpm))
+        root.addWidget(self._build_channels())
         root.addWidget(self._build_body(), 1)
         root.addWidget(self._build_encode())
         root.addWidget(self._build_key())
@@ -1237,6 +1343,104 @@ class MainWindow(QtWidgets.QMainWindow):
         self.clear_button.clicked.connect(self._on_clear)
         lay.addWidget(self.clear_button)
         return bar
+
+    # ------------------------------------------------------------ channels
+
+    def _build_channels(self) -> QtWidgets.QWidget:
+        """Listen with / Send with: chips for any combination of channels, remembered."""
+        t = self.theme
+        bar = QtWidgets.QFrame()
+        bar.setObjectName("toolbar")
+        lay = QtWidgets.QHBoxLayout(bar)
+        lay.setContentsMargins(14, 6, 14, 6)
+        lay.setSpacing(10)
+        self.chips: dict[tuple[str, str], QtWidgets.QPushButton] = {}
+
+        def chip(group: str, key: str, text: str, tip: str) -> QtWidgets.QPushButton:
+            b = QtWidgets.QPushButton(text)
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.setFont(self._font(12))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.setToolTip(tip)
+            available = DESKTOP_AVAILABLE[group][key]
+            b.setEnabled(available)
+            b.setChecked(bool(available and self._channels[group][key]))
+            b.clicked.connect(lambda _=False, g=group, k=key: self._on_chip(g, k))
+            self.chips[(group, key)] = b
+            lay.addWidget(b)
+            return b
+
+        lay.addWidget(self._field_label("Listen with"))
+        self.chip_mic = chip("listen", "mic", "Microphone", "Decode what the microphone hears")
+        chip("listen", "camera", "Camera", "Decode a flashing light through a camera: browser app only, next release")
+        lay.addSpacing(8)
+        lay.addWidget(self._field_label("Send with"))
+        self.chip_audio = chip("send", "audio", "Audio", "Play and the key sound through the speakers")
+        self.chip_light = chip("send", "light", "Screen light", "Play and the key flash the signal lamp (or the whole screen)")
+        chip("send", "torch", "Torch", "Phones only")
+        chip("send", "vibrate", "Vibration", "Phones only")
+        lay.addSpacing(8)
+        self.light_full_button = self._button("Full-screen light")
+        self.light_full_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.light_full_button.setToolTip("Turn the whole screen into the signal lamp; click or Esc leaves")
+        self.light_full_button.clicked.connect(self._toggle_light_window)
+        lay.addWidget(self.light_full_button)
+        lay.addStretch(1)
+        self._apply_channels()
+        return bar
+
+    def _listen_on(self, key: str) -> bool:
+        return bool(self._channels["listen"].get(key) and DESKTOP_AVAILABLE["listen"][key])
+
+    def _send_on(self, key: str) -> bool:
+        return bool(self._channels["send"].get(key) and DESKTOP_AVAILABLE["send"][key])
+
+    def _on_chip(self, group: str, key: str) -> None:
+        self._channels[group][key] = self.chips[(group, key)].isChecked()
+        self.settings.setValue(SETTINGS_CHANNELS, json.dumps(self._channels, sort_keys=True))
+        self._apply_channels()
+
+    def _apply_channels(self) -> None:
+        lk = self._livekey
+        if lk is not None:
+            lk.set_speakers(self._send_on("audio"))
+        if hasattr(self, "light_full_button"):
+            self.light_full_button.setEnabled(self._send_on("light"))
+        if not self._send_on("light") and self._light_window is not None:
+            self._light_window.close()
+
+    def _send_state_now(self) -> bool:
+        """Whether Play or the key is sending a mark right now."""
+        lk = self._livekey
+        if lk is not None and lk.running and lk.is_on():
+            return True
+        if self._light_timing is not None:
+            return timing_state_at(self._light_timing, (time.monotonic() - self._light_t0) * 1000.0)
+        return False
+
+    def _toggle_light_window(self) -> None:
+        """Open (or close) the full-screen lamp, after the photosensitivity notice the first time."""
+        if self._light_window is not None:
+            self._light_window.close()
+            return
+        if str(self.settings.value(SETTINGS_FLASH_NOTICE, "0")) != "1":
+            answer = QtWidgets.QMessageBox.warning(
+                self, "The whole screen will flash",
+                "Full-screen light turns the display on and off at Morse speed, several times a second. "
+                "Flashing light can trigger seizures in people with photosensitive epilepsy. Point the screen "
+                "away from anyone who may be affected; click or press Esc to leave.",
+                QtWidgets.QMessageBox.StandardButton.Ok | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Cancel)
+            if answer != QtWidgets.QMessageBox.StandardButton.Ok:
+                return
+            self.settings.setValue(SETTINGS_FLASH_NOTICE, "1")
+        win = LightWindow(self.theme)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.destroyed.connect(lambda *_: setattr(self, "_light_window", None))
+        self._light_window = win
+        win.showFullScreen()
 
     def _build_body(self) -> QtWidgets.QWidget:
         body = QtWidgets.QWidget()
@@ -1457,6 +1661,13 @@ class MainWindow(QtWidgets.QMainWindow):
         detector = Readout(self.theme, self.fonts, "Detector")
         detector.set_widget(self.pill)
         blay.addWidget(detector)
+        # The signal lamp: amber ring while receiving, white fill while sending
+        # (the full-screen window is the large version).
+        self.lamp = Lamp(self.theme, size=30)
+        self.lamp.setToolTip("Signal lamp: amber ring while a mark is received, white fill while one is sent")
+        lamp_row = Readout(self.theme, self.fonts, "Lamp")
+        lamp_row.set_widget(self.lamp)
+        blay.addWidget(lamp_row)
         self.readouts: dict[str, Readout] = {}
         for key in ("Level", "Signal / floor", "Speed", "Letters", "Unknown"):
             ro = Readout(self.theme, self.fonts, key)
@@ -1871,11 +2082,14 @@ class MainWindow(QtWidgets.QMainWindow):
             samples = render_tone(timing, self.pipeline.f0, fs=DEFAULT_FS)
             if self._player is None:
                 self._player = TonePlayer(fs=DEFAULT_FS)
-            self._player.play(samples)
+            if self._send_on("audio"):
+                self._player.play(samples)
         except Exception as exc:  # no output device, PortAudio error
             self.set_status_error(f"Play failed: {exc}")
             return
         self.set_status_error("")
+        self._light_timing = list(timing)
+        self._light_t0 = time.monotonic()
         if self.feed_check.isChecked() and self._source is not None:
             self._inject = np.asarray(samples, dtype=np.float32)
             self._inject_pos = 0
@@ -2119,6 +2333,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton#segL {{ border-top-left-radius: 3px; border-bottom-left-radius: 3px; }}
             QPushButton#segR {{ border-top-right-radius: 3px; border-bottom-right-radius: 3px; }}
             QPushButton#segL:checked, QPushButton#segM:checked, QPushButton#segR:checked {{ background: {t.ink}; color: {t.panel}; }}
+            QPushButton#chip {{ border: 1px solid {t.line}; border-radius: 12px; padding: 2px 10px; background: {t.panel}; color: {t.ink2}; }}
+            QPushButton#chip:checked {{ background: {t.ink}; color: {t.panel}; border-color: {t.ink}; }}
+            QPushButton#chip:disabled {{ color: {t.ink3}; }}
             QComboBox, QSpinBox, QLineEdit {{ min-height: 26px; max-height: 26px; padding: 0 8px;
                 border: 1px solid {t.line}; border-radius: 4px; background: {t.panel}; color: {t.ink};
                 selection-background-color: {t.spec}; selection-color: #FFFFFF; }}
@@ -2226,6 +2443,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def stop(self) -> None:
         """Stop the timer, the audio source, any playback and the key's output stream."""
         self.timer.stop()
+        if self._light_window is not None:
+            self._light_window.close()
         self._stop_play()
         if self._livekey is not None:
             self._livekey.stop()
@@ -2274,8 +2493,8 @@ class MainWindow(QtWidgets.QMainWindow):
         blocks: list[np.ndarray] = []
         if self._source is not None:
             blocks = self._source.read_blocks()
-        if self.paused:
-            blocks = []  # discarded: the display stays frozen
+        if self.paused or not self._listen_on("mic"):
+            blocks = []  # discarded: the display stays frozen (or the microphone is not a listen source)
         else:
             if blocks:
                 tick_level = -math.inf
@@ -2459,6 +2678,11 @@ class MainWindow(QtWidgets.QMainWindow):
         n_wave = int(round(WAVE_MS * self.pipeline.fs / 1000.0))
         self.waveform.set_samples(self._filtered[-n_wave:] if self._filtered.size else self._filtered)
         self.pill.set_on(bool(last.on) if last else False)
+        rx = bool(last.on) if (last and self._listen_on("mic") and not self.paused) else False
+        tx = self._send_on("light") and self._send_state_now()
+        self.lamp.set_state(rx, tx)
+        if self._light_window is not None:
+            self._light_window.set_state(rx, tx)
         ro = self.readouts
         ro["Level"].set_value(f"{self._level_db:.0f}" if last else "—", "dBFS")
         snr = (last.peak_db - last.floor_db) if last else None
@@ -2827,6 +3051,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._livekey = LiveKey(self._keyer, f0=self.pipeline.f0, fs=DEFAULT_FS)
             self._livekey.set_frequency(self.pipeline.f0)
             self._livekey.set_sidetone(float(self._sidetone_hz) or None)
+            self._livekey.set_speakers(self._send_on("audio"))
             self._livekey.set_speed(1200.0 / float(self.enc_wpm_spin.value()))
             self._livekey.start()
         except Exception as exc:  # no output device, PortAudio error
@@ -2984,7 +3209,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sent_output.setText(html_text or " ")
 
     def _page_sounding(self) -> bool:
-        """Whether Play or the hand key is producing sound right now."""
+        """Whether Play or the hand key is producing sound right now (through the speakers)."""
+        if not self._send_on("audio"):
+            return False
         lk = self._livekey
         return self._inject is not None or bool(lk is not None and lk.running and lk.is_on())
 
@@ -3016,12 +3243,15 @@ class MainWindow(QtWidgets.QMainWindow):
             samples = render_tone(enc.timing, self.pipeline.f0, fs=DEFAULT_FS)
             if self._player is None:
                 self._player = TonePlayer(fs=DEFAULT_FS)
-            self._player.play(samples)
+            if self._send_on("audio"):
+                self._player.play(samples)
         except Exception as exc:  # no output device, PortAudio error
             self.set_status_error(f"Play failed: {exc}")
             return
         self.set_status_error("")
         self._play_started = time.monotonic()
+        self._light_timing = list(enc.timing)
+        self._light_t0 = self._play_started
         if self.feed_check.isChecked() and self._source is not None:
             self._inject = np.asarray(samples, dtype=np.float32)
             self._inject_pos = 0
@@ -3031,6 +3261,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.keying_guide.set_playhead(0.0)
 
     def _stop_play(self) -> None:
+        self._light_timing = None  # a chart character plays without a playhead, so clear this first
         if self._play_started is None:
             return
         self._play_started = None

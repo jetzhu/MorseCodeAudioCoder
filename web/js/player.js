@@ -256,6 +256,12 @@ export class TonePlayer {
     this.startTime = 0;
     /** @type {number} total length (ms) of the current playback */
     this.durationMs = 0;
+    /** @type {GainNode | null} the speaker branch, muted when `speakers` is false */
+    this._destGain = null;
+    /** Whether the tone reaches the speakers; the extra outputs always get it. */
+    this.speakers = true;
+    /** @type {Array<{on: boolean, ms: number}>} the sequence being played */
+    this._segments = [];
 
     /**
      * Extra destinations for the keyed tone besides the speakers: the
@@ -324,7 +330,10 @@ export class TonePlayer {
     const gainNode = ac.createGain();
     gainNode.gain.setValueAtTime(0, ac.currentTime);
     osc.connect(gainNode);
-    gainNode.connect(ac.destination);
+    const destGain = ac.createGain();
+    destGain.gain.value = this.speakers ? 1 : 0;
+    gainNode.connect(destGain);
+    destGain.connect(ac.destination);
     for (const node of this._outputs) safeConnect(gainNode, node);
 
     const t0 = ac.currentTime + this.leadMs / 1000;
@@ -348,6 +357,8 @@ export class TonePlayer {
 
     this._osc = osc;
     this._gain = gainNode;
+    this._destGain = destGain;
+    this._segments = segments;
     this.startTime = t0;
     this.durationMs = totalMs;
     this._playing = true;
@@ -358,6 +369,27 @@ export class TonePlayer {
   /** Stop at once; calls `onEnd` if something was playing. */
   stop() {
     if (this._playing) this._teardown(true);
+  }
+
+  /** Send the tone to the speakers or not; the decoder feed is unaffected. @param {boolean} on */
+  setSpeakers(on) {
+    this.speakers = Boolean(on);
+    if (this._destGain && this.audioContext) {
+      this._destGain.gain.setTargetAtTime(this.speakers ? 1 : 0, this.audioContext.currentTime, 0.01);
+    }
+  }
+
+  /** Whether a mark is sounding right now, for a lamp that follows the playback. */
+  stateAtNow() {
+    if (!this._playing) return false;
+    const ms = this.elapsedMs;
+    let t = 0;
+    for (const seg of this._segments) {
+      const end = t + seg.ms;
+      if (ms < end) return Boolean(seg.on);
+      t = end;
+    }
+    return false;
   }
 
   /**
@@ -401,9 +433,19 @@ export class TonePlayer {
     this._cancelTick();
     const osc = this._osc;
     const gainNode = this._gain;
+    const destGain = this._destGain;
     this._osc = null;
     this._gain = null;
+    this._destGain = null;
+    this._segments = [];
     this._playing = false;
+    if (destGain) {
+      try {
+        destGain.disconnect();
+      } catch {
+        /* never connected */
+      }
+    }
     if (osc) {
       osc.onended = null;
       try {

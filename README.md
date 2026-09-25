@@ -55,6 +55,17 @@ is remembered between runs. **Sidetone** is the pitch you hear while keying,
 the beeper frequency itself. The decoder is always fed the beeper frequency,
 so the sidetone never affects decoding.
 
+## Light, and channels you choose
+
+Two chip rows above the plots pick what the app listens with and sends with,
+in any combination: Microphone (and, soon, Camera) to listen; Audio, Screen
+light, Vibration (phones) and, soon, Torch to send. Everything a device
+supports starts selected. The signal lamp in the rail shows an amber ring
+while a mark is received and a white fill while one is sent; Full-screen light
+turns the whole display into the lamp for sending across a room (a
+photosensitivity notice shows first). On the page, Handset in the title bar
+switches to a compact phone layout: lamp, key and text, the rest behind More.
+
 ## Reference chart
 
 Section G at the bottom of the console is a Morse code chart built from the

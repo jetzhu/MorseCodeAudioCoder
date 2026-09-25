@@ -491,6 +491,27 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Channels, lamp, full-screen light, vibration, handset layout (2026-09-25,
+  v0.1.13; step 1 of the light work): `morse/channels.py` and
+  `web/js/channels.js` share the selection rules (`sanitize`, `effective`,
+  `timing_state_at`, `vibration_pattern`); chips Listen with (Microphone;
+  Camera greyed until step 2) and Send with (Audio, Screen light, Torch greyed
+  until step 3, Vibration on devices with `navigator.vibrate`), any
+  combination, all on by default, remembered (localStorage `morse.channels`,
+  QSettings `channels`). Audio off mutes the speaker branch of `TonePlayer`
+  (`setSpeakers`, a gain before the destination) and `LiveKey` (`speakers`
+  flag in both languages) while the decoder feed is unaffected; Start needs a
+  listen source; the mic gate needs Audio and Microphone. `web/js/light.js`
+  `Lamp` drives every `.lamp` element and the full-screen overlay (`rx` ring
+  while the detector is ON, `tx` fill while `player.stateAtNow()` or the key
+  is on); the desktop has a `Lamp` widget in the rail and a `LightWindow`
+  full-screen window, with a photosensitivity notice the first time
+  (`morse.light.notice` / QSettings `light/notice`). Vibration follows Play
+  (`vibrationPattern`) and the key (`updateKeyVibration`). The page has two
+  layouts on one URL: `body.view-handset` hides the plots, rail, About and
+  notes and reorders lamp, text, encoder and key with CSS; chosen by
+  `?view=handset|desktop`, then localStorage `morse.view`, then narrow +
+  touch; a More button reveals the hidden settings, practice and chart.
 - Star on GitHub (2026-09-23, v0.1.12): a quiet link in the page footer and
   download panel with the live star count (one `GET` of the repository from
   api.github.com, named in the About privacy sentence), and in the desktop
