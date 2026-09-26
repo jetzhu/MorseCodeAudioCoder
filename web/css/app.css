@@ -342,7 +342,9 @@ a.star .starcount:not(:empty)::before { content: " · "; }
 .meter { display: grid; grid-template-columns: 26px 1fr; gap: 10px; height: 150px; position: relative; }
 /* Absolutely positioned like the other canvases: a canvas sized from its own
    clientHeight inside an auto grid row would otherwise grow on every resize. */
-.meter canvas { position: absolute; top: 0; bottom: 0; left: 36px; right: 0; width: auto; height: auto; display: block; }
+/* The size must be explicit: with "auto", a canvas takes its size from its own pixel buffer, which
+   fit() sets to size x devicePixelRatio, so on a phone (dpr 2 to 3) it grew on every frame. */
+.meter canvas { position: absolute; top: 0; left: 36px; width: calc(100% - 36px); height: 100%; display: block; }
 .meter .scale { position: relative; height: 100%; font-size: 10px; color: var(--ink-3); }
 .meter .scale span { position: absolute; right: 0; transform: translateY(-50%); }
 .wave { height: 54px; position: relative; margin-top: 10px; }
