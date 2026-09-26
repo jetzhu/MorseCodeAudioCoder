@@ -107,7 +107,10 @@ export class CameraInput {
 
   _schedule() {
     if (!this._running) return;
-    if (typeof this.video.requestVideoFrameCallback === "function") {
+    // A hidden preview (Show: Light off) gets no frame callbacks, but its stream
+    // keeps playing, so sample it on animation frames instead.
+    const visible = this.video.isConnected && this.video.getClientRects().length > 0;
+    if (visible && typeof this.video.requestVideoFrameCallback === "function") {
       this._handleKind = "rvfc";
       this._handle = this.video.requestVideoFrameCallback((now, meta) => this._sample(frameTime(now, meta)));
     } else {

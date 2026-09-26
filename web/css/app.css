@@ -185,34 +185,46 @@ body.view-handset .foot { font-size: 12px; }
 body.view-handset .win { border-radius: 6px; }
 body.view-handset .titlebar > span:not(.name):not(.viewswitch) { display: none; }
 body.view-handset .titlebar .more { display: inline-block; }
-/* Handset: one signal at a time. Audio shows every audio panel and control; Light shows the lamp. */
-.sigswitch { display: none; }
-body.view-handset .sigswitch { display: inline-flex; }
-body.view-handset.sig-light .toolbar .field:not(:has(#speedLabel)) { display: none; }
-body.view-handset.sig-light .toolbar #pauseBtn, body.view-handset.sig-light .toolbar #saveBtn, body.view-handset.sig-light .toolbar #logBtn { display: none; }
+/* Show: the audio panels and the light panels can each be hidden, and sized S / M / L. */
+.showctl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sizeseg button { height: 24px; padding: 0 8px; font-size: 12px; }
+.sizeseg button:disabled { opacity: 0.4; cursor: default; }
+body.audio-s .main { grid-template-rows: 150px 160px minmax(168px, auto); }
+body.audio-l .main { grid-template-rows: 300px 320px minmax(168px, auto); }
+body.hide-audio .main { grid-template-rows: minmax(168px, auto); }
+body.hide-audio .main > .panel:nth-child(1), body.hide-audio #powerPlot, body.hide-audio .rail > .block:first-child { display: none; }
+body.hide-light .lampblock, body.hide-light .camstrip { display: none; }
+body.light-s .lamp { width: 48px; height: 48px; border-width: 5px; }
+body.light-l .lamp { width: 112px; height: 112px; border-width: 8px; }
+body.light-s .camview { width: 160px; }
+body.light-l .camview { width: 360px; }
 body.view-handset .toolbar select.ctl { min-width: 0; max-width: 100%; }
+body.view-handset.hide-audio .toolbar .field:not(:has(#speedLabel)) { display: none; }
+body.view-handset.hide-audio .toolbar #pauseBtn, body.view-handset.hide-audio .toolbar #saveBtn, body.view-handset.hide-audio .toolbar #logBtn { display: none; }
 body.view-handset .body { display: flex; flex-direction: column; }
 body.view-handset .main, body.view-handset .rail { display: contents; }
-body.view-handset.sig-light .main > .panel:nth-child(1), body.view-handset.sig-light #powerPlot { display: none; }
-body.view-handset.sig-audio .main > .panel:nth-child(1) { order: 1; height: 200px; }
-body.view-handset.sig-audio .main > .panel:nth-child(2) { order: 2; height: 220px; }
-body.view-handset.sig-audio .lampblock { display: none; }
-body.view-handset.sig-audio .rail > .block:first-child { order: 4; }
-body.view-handset.sig-audio .rail > .block.readouts { order: 5; }
-body.view-handset.sig-audio .rail > .block.tip { display: none; }
-body.view-handset.sig-audio .main > .panel:nth-child(3) { order: 3; }
+body.view-handset .main > .panel:nth-child(1) { order: 1; height: 200px; }
+body.view-handset #powerPlot { order: 2; height: 220px; }
+body.view-handset.audio-s .main > .panel:nth-child(1) { height: 140px; }
+body.view-handset.audio-s #powerPlot { height: 150px; }
+body.view-handset.audio-l .main > .panel:nth-child(1) { height: 290px; }
+body.view-handset.audio-l #powerPlot { height: 310px; }
+body.view-handset .lampblock { order: 3; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+body.view-handset .main > .panel:nth-child(3) { order: 4; min-height: 110px; }
+body.view-handset .rail > .block:first-child { order: 5; }
+body.view-handset .rail > .block.readouts { order: 6; }
+body.view-handset .rail > .block.tip { display: none; }
 body.view-handset .chipbar { gap: 8px 18px; }
 body.view-handset .chipgroup { flex: 1 1 100%; min-width: 0; }
-body.view-handset.sig-light .rail > .block:not(.lampblock) { display: none; }
-body.view-handset .lampblock { order: 1; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 body.view-handset .lampblock h4 { text-align: center; }
 body.view-handset .lampwrap { padding: 10px 0; }
 body.view-handset .lamp { width: min(58vw, 300px); height: min(58vw, 300px); border-width: 10px; }
+body.view-handset.light-s .lamp { width: min(30vw, 130px); height: min(30vw, 130px); border-width: 7px; }
+body.view-handset.light-l .lamp { width: min(84vw, 460px); height: min(84vw, 460px); border-width: 14px; }
 body.view-handset .lampblock .eyebrow { text-align: center; }
-body.view-handset .main > .panel:nth-child(3) { order: 2; min-height: 110px; }
 body.view-handset .decoded { grid-template-columns: 1fr; min-height: 0; }
-body.view-handset.sig-light .timing { display: none; }
-body.view-handset.sig-audio .timing { border-left: 0; border-top: 1px solid var(--line); }
+body.view-handset.hide-audio .timing { display: none; }
+body.view-handset .timing { border-left: 0; border-top: 1px solid var(--line); }
 body.view-handset .text { font-size: 22px; }
 body.view-handset .enc-right { display: none; }
 body.view-handset:not(.more-open) .enc-controls > :not(#encPlay) { display: none; }
@@ -225,7 +237,8 @@ body.view-handset button.ctl.key.big { min-width: 0; width: 100%; height: 96px; 
 body.view-handset:not(.more-open) .practice, body.view-handset:not(.more-open) .reference { display: none; }
 body.view-handset .statusbar { font-size: 11px; gap: 10px; }
 body.view-handset .camleft { grid-template-columns: 1fr; }
-body.view-handset .camview { width: 100%; }
+body.view-handset .camview, body.view-handset.light-l .camview { width: 100%; }
+body.view-handset.light-s .camview { width: 60%; }
 body.view-handset .camtrace { min-height: 70px; }
 .toolbar {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
