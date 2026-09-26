@@ -55,6 +55,7 @@ const REPO_API = "https://api.github.com/repos/jetzhu/MorseCodeAudioCoder";
 const STORE_STAR_NUDGE = "morse.star.nudged";
 const STORE_CHANNELS = "morse.channels";
 const STORE_VIEW = "morse.view";
+const STORE_SIGNAL = "morse.signalView";
 const STORE_FLASH_NOTICE = "morse.light.notice";
 const RELEASES_PAGE = "https://github.com/jetzhu/MorseCodeAudioCoder/releases";
 const REPO_GIT = "https://github.com/jetzhu/MorseCodeAudioCoder.git";
@@ -146,6 +147,7 @@ const el = {
   chipTorch: $("chipTorch"), chipVibrate: $("chipVibrate"), lightFullBtn: $("lightFullBtn"), lightFull: $("lightFull"),
   flashNotice: $("flashNotice"), flashOk: $("flashOk"), flashCancel: $("flashCancel"),
   viewDesktop: $("viewDesktop"), viewHandset: $("viewHandset"), moreBtn: $("moreBtn"),
+  sigAudio: $("sigAudio"), sigLight: $("sigLight"),
   camStrip: $("camStrip"), camView: $("camView"), camVideo: $("camVideo"), camSpot: $("camSpot"),
   linkSend: $("linkSend"), linkCheck: $("linkCheck"), linkResult: $("linkResult"),
   camPill: $("camPill"), camLevel: $("camLevel"), camRange: $("camRange"), camFps: $("camFps"), camMax: $("camMax"),
@@ -1688,6 +1690,17 @@ function setView(view, persist = true) {
   dirty = true;
 }
 
+/** Handset layout: show the audio panels ("audio") or the signal lamp ("light"). */
+function setSignalView(sig, persist = true) {
+  const light = sig === "light";
+  document.body.classList.toggle("sig-light", light);
+  document.body.classList.toggle("sig-audio", !light);
+  el.sigAudio.setAttribute("aria-pressed", String(!light));
+  el.sigLight.setAttribute("aria-pressed", String(light));
+  if (persist) store.set(STORE_SIGNAL, light ? "light" : "audio");
+  dirty = true;
+}
+
 function initialView() {
   const fromUrl = new URLSearchParams(location.search).get("view");
   if (fromUrl === "handset" || fromUrl === "desktop") return fromUrl;
@@ -2317,6 +2330,8 @@ function wire() {
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement && lamp.fullActive) lamp.exitFull();
   });
+  el.sigAudio.addEventListener("click", () => setSignalView("audio"));
+  el.sigLight.addEventListener("click", () => setSignalView("light"));
   el.viewDesktop.addEventListener("click", () => setView("desktop"));
   el.viewHandset.addEventListener("click", () => setView("handset"));
   el.moreBtn.addEventListener("click", () => {
@@ -2456,6 +2471,7 @@ function init() {
   initChannels();
   buildEncoding(); // again, now that the channels (and the torch's speed cap) are known
   setView(initialView(), false);
+  setSignalView(store.get(STORE_SIGNAL) === "light" ? "light" : "audio", false);
   updateControls();
   updateStatus();
   refreshDevices();

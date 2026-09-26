@@ -491,6 +491,14 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Handset Show switch (2026-09-26, v0.1.17): the handset layout shows one
+  signal at a time. `body.sig-audio` (default) brings back every audio panel
+  and control: spectrum, tone power with the ON strip, timing readouts, level
+  meter and waveform, detector readouts, and Input, Mic, Tone, Auto-detect,
+  Pause, Save 30 s and Download log. `body.sig-light` shows the signal lamp.
+  Remembered in localStorage `morse.signalView`. The camera strip, when the
+  camera listens, shows in both (hiding its video would stop frame callbacks).
+  The Desktop layout always shows everything.
 - Link check (2026-09-26, v0.1.16; step 4): `web/js/linkcheck.js`
   (`LINK_TEST` = "VVV PARIS 73", `extractTest` from the last VVV,
   `testComplete` at the closing 73 or full length, `gradeLink` with the
