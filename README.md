@@ -61,7 +61,8 @@ Two chip rows above the plots pick what the app listens with and sends with,
 in any combination: Microphone and Camera to listen (the page only: tap
 the light in the camera preview and its brightness is decoded like the tone,
 up to about 12 WPM at 30 frames a second); Audio, Screen
-light, Vibration (phones) and, soon, Torch to send. Everything a device
+light, Vibration (phones) and Torch (Chrome on Android; sending is capped at
+8 WPM while it is selected) to send. Everything a device
 supports starts selected. The signal lamp in the rail shows an amber ring
 while a mark is received and a white fill while one is sent; Full-screen light
 turns the whole display into the lamp for sending across a room (a

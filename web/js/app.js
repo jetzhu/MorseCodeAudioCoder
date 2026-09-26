@@ -30,6 +30,7 @@ import { sanitize as sanitizeChannels, vibrationPattern } from "./channels.js";
 import { Lamp } from "./light.js";
 import { CameraInput } from "./camera.js";
 import { LightDetector, SourceArbiter } from "./lightdetect.js";
+import { TORCH_MAX_WPM, Torch } from "./torch.js";
 import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
@@ -79,6 +80,28 @@ const camTrace = [];
 const camLive = () => Boolean(camera && camera.running);
 /** Quiet time after which a source gives up the message: 2 s, or 8 dits at slow speeds. */
 const releaseMs = () => Math.max(2000, 8 * decoder.ditMs);
+
+/** The phone's torch; it borrows the listening camera's track when there is one. */
+const torch = new Torch({ external: () => (camLive() ? camera.track : null) });
+/** The torch is in use (selected and not known to be missing), so sending is capped at TORCH_MAX_WPM. */
+const torchLimits = () => sendOn("torch") && torch.supported !== false;
+
+function torchUnavailable() {
+  avail.send.torch = false;
+  el.chipTorch.title = `Torch: ${torch.reason}`;
+  showNote(`Torch unavailable: ${torch.reason}.`, 8000);
+  applyChannels(false);
+  buildEncoding();
+}
+
+/** Open the torch's camera the first time it is needed; the first element may go without it. */
+function prepareTorch() {
+  if (!sendOn("torch") || torch.ready || torch.supported === false) return Promise.resolve(Boolean(torch.ready));
+  return torch.ensure().then((ok) => {
+    if (!ok) torchUnavailable();
+    return ok;
+  });
+}
 const sendOn = (k) => Boolean(channels.send[k] && avail.send[k]);
 
 // -------------------------------------------------------------------- helpers
@@ -502,6 +525,7 @@ async function startCamera() {
   }
   lightDet.reset();
   camTrace.length = 0;
+  torch.releaseOwn(); // one camera stream at a time: the torch borrows the listening camera from now on
   await camera.start();
   el.camStrip.hidden = false;
   sizeCamView();
@@ -1349,10 +1373,13 @@ function drawHist() {
 const encoder = { text: "", wpm: 8, farnsworth: null, guide: { timing: [], letters: [], totalMs: 0 }, playheadMs: null };
 
 function buildEncoding() {
-  const wpm = clamp(parseFloat(el.encWpm.value) || 8, 2, 40);
+  const typed = clamp(parseFloat(el.encWpm.value) || 8, 2, 40);
+  // The torch cannot switch fast: while it is selected, every channel sends at its top speed or slower.
+  const wpm = torchLimits() ? Math.min(typed, TORCH_MAX_WPM) : typed;
   encoder.wpm = wpm;
   keyer.setSpeed(1200 / wpm);
   updateKeyReadouts();
+  el.chipTorch.textContent = torchLimits() && typed > TORCH_MAX_WPM ? `Torch · ${TORCH_MAX_WPM} WPM` : "Torch";
   const farnsRaw = parseFloat(el.encFarns.value);
   encoder.farnsworth = Number.isFinite(farnsRaw) && farnsRaw >= 2 && farnsRaw < wpm ? farnsRaw : null;
   encoder.text = el.encIn.value;
@@ -1412,6 +1439,14 @@ function togglePlay() {
     return;
   }
   if (!encoder.guide.totalMs) return;
+  if (sendOn("torch") && !torch.ready && torch.supported !== false) {
+    el.encPlay.textContent = "Opening torch…";
+    prepareTorch().then(() => {
+      el.encPlay.textContent = "Play tone";
+      if (!player.playing) togglePlay();
+    });
+    return;
+  }
   try {
     player.audioContext = ensureContext();
     syncPlayerFeed();
@@ -1498,6 +1533,7 @@ const liveKey = new LiveKey(keyer, { gain: 0.15 });
 liveKey.onChange = () => {
   updateMicGate();
   updateKeyVibration();
+  updateLamp(); // at once, not at the next frame: the torch is slow enough already
   dirty = true;
 };
 
@@ -1513,8 +1549,10 @@ function sendingNow() {
 
 function updateLamp() {
   const rx = state.running && !state.paused && ((listenOn("mic") && micLive() && detector.state) || (listenOn("camera") && camLive() && lightDet.state));
-  const tx = sendOn("light") && sendingNow();
+  const sending = sendingNow();
+  const tx = sendOn("light") && sending;
   lamp.setState(rx, tx);
+  if (torch.ready) torch.set(sendOn("torch") && sending);
 }
 
 function vibrateTiming(timing) {
@@ -1575,6 +1613,10 @@ function exitFullLight() {
 function initChannels() {
   avail.listen.mic = state.supported;
   avail.listen.camera = CameraInput.supported() && window.isSecureContext !== false;
+  // Only phones have a torch the browser might switch; on a laptop the chip stays greyed
+  // rather than asking for the webcam. Whether this phone's browser can is learnt on first use.
+  avail.send.torch = avail.listen.camera && matchMedia("(pointer: coarse)").matches;
+  if (!avail.send.torch) el.chipTorch.title = "Torch: phones only (Chrome on Android)";
   avail.send.vibrate = typeof navigator.vibrate === "function";
   try {
     channels = sanitizeChannels(JSON.parse(store.get(STORE_CHANNELS) || "null"));
@@ -1600,6 +1642,13 @@ function toggleChannel(group, key) {
     else stopCamera();
   }
   if (group === "listen" && key === "mic" && !listenOn("mic")) arbiter.release("mic");
+  if (group === "send" && key === "torch") {
+    if (!sendOn("torch")) {
+      torch.set(false);
+      torch.releaseOwn();
+    }
+    buildEncoding(); // the 8 WPM cap comes and goes with the torch
+  }
   updateStatus();
 }
 
@@ -1762,6 +1811,7 @@ function ensureLiveKey() {
     const ac = ensureContext();
     if (!liveKey.running) liveKey.start(ac, state.f0);
     syncPlayerFeed();
+    prepareTorch();
     return true;
   } catch (err) {
     showMessage(`The key needs Web Audio: ${err.message}`);
@@ -2343,6 +2393,7 @@ function init() {
   setPracticeKind("words");
   wire();
   initChannels();
+  buildEncoding(); // again, now that the channels (and the torch's speed cap) are known
   setView(initialView(), false);
   updateControls();
   updateStatus();

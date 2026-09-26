@@ -388,6 +388,7 @@ two phones each sending and receiving by light; browser first. Steps:
    which caps light decoding near 10 to 12 WPM); synthetic-frame tests.
    Built 2026-09-26 (v0.1.14).
 3. Torch on Android Chrome behind capability detection, capped at 8 WPM.
+   Built 2026-09-26 (v0.1.15).
 4. A link check between two phones (one sends a known word, the other
    grades it, reusing the practice scoring).
 Desktop: the lamp and full-screen window in step 1; a USB-serial DTR/RTS

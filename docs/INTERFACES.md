@@ -491,6 +491,14 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Torch (2026-09-26, v0.1.15; step 3): `web/js/torch.js` `Torch` switches
+  the `torch` constraint of a rear-camera track (`getCapabilities().torch`),
+  borrowing the listening camera's track or opening its own on first use;
+  switching is coalesced to the latest wanted state. The chip is offered on
+  touch devices with a camera; the first use decides (unsupported on iPhone:
+  the chip greys out with the reason). While selected, sending is capped at
+  `TORCH_MAX_WPM` = 8 for every channel (encoder, key, chart) so they stay in
+  step. The lamp update drives it (Play frames and every key change).
 - Camera listening (2026-09-26, v0.1.14; step 2 of the light work, page
   only): `web/js/camera.js` `CameraInput` opens the rear camera
   (`facingMode: environment`, ideal 640x480 at 60 fps), scales each frame to
