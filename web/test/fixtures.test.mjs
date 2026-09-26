@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { Goertzel } from "../js/dsp.js";
-import { ToneDetector, isTonal } from "../js/detector.js";
+import { ToneDetector, combineDb, isTonal, neighborFrequencies } from "../js/detector.js";
 import { MorseDecoder } from "../js/decoder.js";
 import { Run } from "../js/runs.js";
 import { readWav } from "./wav.mjs";
@@ -47,6 +47,7 @@ const TOLERANCE_MS = 100.0;
 function decodeSamples(samples, fs, f0, { wpm = null, blockSize = BLOCK_SIZE } = {}) {
   const blockMs = (1000.0 * blockSize) / fs;
   const goertzel = new Goertzel(f0, fs, blockSize);
+  const neighbors = neighborFrequencies(f0, fs).map((f) => new Goertzel(f, fs, blockSize));
   const detector = new ToneDetector({ blockMs }); // contract defaults, like Pipeline
   const decoder = new MorseDecoder({ wpm });
   /** @type {Run[]} */
@@ -59,7 +60,8 @@ function decodeSamples(samples, fs, f0, { wpm = null, blockSize = BLOCK_SIZE } =
     let sumSq = 0;
     for (let k = 0; k < block.length; k++) sumSq += block[k] * block[k];
     const levelDb = 10 * Math.log10(sumSq / block.length + 1e-12); // the pipeline's level_dbfs
-    for (const run of detector.update(powerDb, isTonal(powerDb, levelDb))) {
+    const neighborDb = combineDb(neighbors.map((g) => g.powerDb(block)));
+    for (const run of detector.update(powerDb, isTonal(powerDb, levelDb, undefined, neighborDb))) {
       runs.push(run);
       text += decoder.feed(run);
     }

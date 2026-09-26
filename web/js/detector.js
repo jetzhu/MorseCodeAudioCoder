@@ -425,15 +425,43 @@ export function tonalityDb(powerDb, rmsDb) {
 }
 
 /**
- * Whether a block's energy is concentrated in the tone bin: the `tonal` flag
- * for `ToneDetector.update`. A beeper block scores near 0 dB, white noise or
- * a keyboard click near -24 dB; the default threshold sits at -15 dB. A block
- * that fails is a broadband transient: it may teach the detector the noise
- * level but must never switch it ON. Mirror of `morse.tone_detector.is_tonal`.
+ * Whether a block is tone rather than noise: the `tonal` flag for
+ * `ToneDetector.update`. Tonality: the tone bin must hold a fair share of the
+ * block's energy (beeper near 0 dB, full-band noise near -24 dB, threshold
+ * -15 dB). Peakiness, when `neighborDb` (mean power at f0 +-300 and +-600 Hz,
+ * see `combineDb`) is given: the bin must stand `minPeakinessDb` above its
+ * neighbours. Tonality alone fails on phones, whose band-limited microphones
+ * concentrate a click's energy; noise of any bandwidth is about as strong
+ * beside f0 as at it, a beeper is a sharp peak. A block that fails may teach
+ * the detector the noise level but never switches it ON. Mirror of
+ * `morse.tone_detector.is_tonal`.
  *
  * @param {number} powerDb @param {number} rmsDb
- * @param {number} [minTonalityDb=TONALITY_MIN_DB] @returns {boolean}
+ * @param {number} [minTonalityDb=TONALITY_MIN_DB]
+ * @param {number | null} [neighborDb=null] @param {number} [minPeakinessDb=PEAKINESS_MIN_DB]
+ * @returns {boolean}
  */
-export function isTonal(powerDb, rmsDb, minTonalityDb = TONALITY_MIN_DB) {
-  return tonalityDb(powerDb, rmsDb) >= minTonalityDb;
+export function isTonal(powerDb, rmsDb, minTonalityDb = TONALITY_MIN_DB, neighborDb = null, minPeakinessDb = PEAKINESS_MIN_DB) {
+  if (tonalityDb(powerDb, rmsDb) < minTonalityDb) return false;
+  if (neighborDb === null || neighborDb === undefined) return true;
+  return powerDb - neighborDb >= minPeakinessDb;
+}
+
+/** Where the neighbour bands sit relative to `f0`: beyond the 10 ms block's main lobe (100 Hz). */
+export const NEIGHBOR_OFFSETS_HZ = Object.freeze([-600, -300, 300, 600]);
+
+/** A tone block must stand this far above the mean of its neighbour bands. */
+export const PEAKINESS_MIN_DB = 8.0;
+
+/** Neighbour-band frequencies for `f0`, leaving out any outside `0 < f < fs/2`. @param {number} f0 @param {number} fs */
+export function neighborFrequencies(f0, fs) {
+  return NEIGHBOR_OFFSETS_HZ.map((d) => f0 + d).filter((f) => f > 0 && f < fs / 2);
+}
+
+/** Mean power of several bands in dB (averaged in linear power). @param {number[]} valuesDb */
+export function combineDb(valuesDb) {
+  if (!valuesDb.length) return -Infinity;
+  let sum = 0;
+  for (const v of valuesDb) sum += 10 ** (v / 10);
+  return 10 * Math.log10(sum / valuesDb.length);
 }

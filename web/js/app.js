@@ -281,7 +281,7 @@ function onBlock(m) {
   state.skippedFrames = m.skippedFrames || 0;
   state.badBlocks = m.badBlocks || 0;
   if (state.paused) return;
-  processBlock(m.powerDb, m.rmsDb);
+  processBlock(m.powerDb, m.rmsDb, m.neighborDb);
 }
 
 /** Every character the decoder emitted, with when: exported by Download log. */
@@ -328,9 +328,12 @@ async function loadStarCount() {
 }
 
 /** The `Pipeline.process_block` order: detector, decoder feed, idle, then the display buffers. */
-function processBlock(powerDb, rmsDb) {
-  // A loud but broadband block (click, speech) never switches the detector ON.
-  for (const run of detector.update(powerDb, isTonal(powerDb, rmsDb))) feedFrom("mic", run);
+function processBlock(powerDb, rmsDb, neighborDb = null) {
+  // A loud but broadband block (click, speech), or one no sharper than its
+  // neighbour bands (noise through a phone's band-limited microphone), never
+  // switches the detector ON.
+  const tonal = isTonal(powerDb, rmsDb, undefined, Number.isFinite(neighborDb) ? neighborDb : null);
+  for (const run of detector.update(powerDb, tonal)) feedFrom("mic", run);
   const current = detector.currentRun;
   arbiter.tick("mic", current.on, current.on ? 0 : current.ms, releaseMs());
   if (!current.on && arbiter.mayIdle("mic")) logEmit(decoder.idle(current.ms));

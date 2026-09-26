@@ -897,7 +897,10 @@ for (const [name, fixture] of Object.entries(vectors.fixtures)) {
     const series = goertzelSeries(wav.samples, fixture.f0, wav.sampleRate, fixture.block_size);
     const levels = levelSeries(wav.samples, fixture.block_size);
     assert.equal(series.length, fixture.blocks);
-    const tonal = series.map((p, i) => isTonal(p, levels[i]));
+    const { combineDb, neighborFrequencies } = await import("../js/detector.js");
+    const nbSeries = neighborFrequencies(fixture.f0, wav.sampleRate).map((f) => goertzelSeries(wav.samples, f, wav.sampleRate, fixture.block_size));
+    const neighborDb = series.map((_, i) => combineDb(nbSeries.map((s) => s[i])));
+    const tonal = series.map((p, i) => isTonal(p, levels[i], undefined, neighborDb[i]));
     assert.deepEqual(tonal.map(Number), fixture.tonal, "tonal flags agree with Python");
     assert.deepEqual(detectorPairs(series, tonal), fixture.runs);
   });
@@ -970,4 +973,18 @@ test("isTonal and the tonal flag: a click teaches the noise level but never swit
   // while ON the flag is ignored: a click during a mark does not chop it
   det.update(-40, false);
   assert.equal(det.state, true);
+});
+
+test("neighbour-band filter: helpers and rule mirror the Python module", async () => {
+  const { NEIGHBOR_OFFSETS_HZ, PEAKINESS_MIN_DB, combineDb, isTonal: tonal, neighborFrequencies } = await import("../js/detector.js");
+  assert.deepEqual([...NEIGHBOR_OFFSETS_HZ], [-600, -300, 300, 600]);
+  assert.equal(PEAKINESS_MIN_DB, 8);
+  assert.deepEqual(neighborFrequencies(2491, 48000), [1891, 2191, 2791, 3091]);
+  assert.deepEqual(neighborFrequencies(400, 48000), [100, 700, 1000]);
+  assert.ok(Math.abs(combineDb([-10, -10]) + 10) < 1e-9);
+  assert.equal(combineDb([]), -Infinity);
+  assert.equal(tonal(-10, -13), true);
+  assert.equal(tonal(-10, -13, undefined, -40), true);
+  assert.equal(tonal(-10, -13, undefined, -15), false);
+  assert.equal(tonal(-40, -13, undefined, -90), false);
 });

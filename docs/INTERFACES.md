@@ -491,6 +491,17 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Neighbour-band filter (2026-09-27, v0.1.20): a block counts as tone only if
+  it passes the tonality test and its tone bin stands `PEAKINESS_MIN_DB` = 8 dB
+  above the mean power of the bands at f0 +-300 and +-600 Hz
+  (`neighbor_frequencies`, `combine_db`, `is_tonal(..., neighbor_db=)` in
+  `morse/tone_detector.py`; `neighborFrequencies`, `combineDb`, `isTonal(...,
+  neighborDb)` in `web/js/detector.js`). The pipeline, the worklet (posts
+  `neighborDb`), the vector exporter (`neighbor_db` per fixture) and the JS
+  fixture decoder all measure the four extra Goertzel bins. Reason: phones'
+  band-limited microphones concentrate a click's energy, so tonality alone let
+  bursts through as E and T (simulated: 20 bursts band-limited to 8 kHz gave
+  4 letters, 1-4 kHz taps 13; both now 0); real beeper blocks score over 30 dB.
 - Light-link fixes (2026-09-26, v0.1.19): "Send at … WPM" beside the link
   test (mirrors the encoder speed, which on phones is now shown without
   More); a Clear button in the Decoded panel header; the camera locks

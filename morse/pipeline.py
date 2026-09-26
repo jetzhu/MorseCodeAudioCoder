@@ -41,7 +41,7 @@ import numpy as np
 from morse.decoder import MorseDecoder
 from morse.dsp import BandPass, Goertzel
 from morse.runs import Run
-from morse.tone_detector import ToneDetector, is_tonal, tonality_db
+from morse.tone_detector import ToneDetector, combine_db, is_tonal, neighbor_frequencies, tonality_db
 
 __all__ = [
     "BlockResult",
@@ -94,6 +94,8 @@ class BlockResult:
     filtered: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.float32))
     """Band-passed copy of the block (``float32``) for the waveform display."""
     tonality_db: float = 0.0
+    peakiness_db: float = 0.0
+    """How far the tone bin stands above its neighbour bands (see ``is_tonal``)."""
     """Tone power relative to the block's total power: 0 for a pure tone, about -24 for noise."""
 
 
@@ -138,6 +140,7 @@ class Pipeline:
         f0 = _validate_f0(f0, self.fs)
         self.bandpass = BandPass(f0, self.fs)
         self.goertzel = Goertzel(f0, self.fs, self.block_size)
+        self._neighbors = [Goertzel(f, self.fs, self.block_size) for f in neighbor_frequencies(f0, self.fs)]
         # Contract defaults only: block_ms is timing, not a threshold parameter.
         self.detector = ToneDetector(block_ms=self.block_ms)
         self.decoder = MorseDecoder(wpm=wpm, adaptive=adaptive)
@@ -185,11 +188,13 @@ class Pipeline:
 
         filtered = self.bandpass.process(x)
         power_db = self.goertzel.power_db(x)
+        neighbor_db = combine_db([g.power_db(x) for g in self._neighbors]) if self._neighbors else None
 
         det = self.detector
-        # A loud but broadband block (click, speech) never switches the detector
-        # ON, though it still teaches it the noise level.
-        runs = det.update(power_db, tonal=is_tonal(power_db, level_dbfs))
+        # A loud but broadband block (click, speech), or one no sharper than its
+        # neighbour bands, never switches the detector ON, though it still
+        # teaches it the noise level.
+        runs = det.update(power_db, tonal=is_tonal(power_db, level_dbfs, neighbor_db=neighbor_db))
         new_text = self._feed_runs(runs)
         current = det.current_run
         if not current.on:
@@ -208,6 +213,7 @@ class Pipeline:
             runs=runs,
             filtered=filtered,
             tonality_db=tonality_db(power_db, level_dbfs),
+            peakiness_db=(power_db - neighbor_db) if neighbor_db is not None else 0.0,
         )
 
     def flush(self) -> str:
@@ -238,6 +244,7 @@ class Pipeline:
         self.detector.reset()
         self.bandpass.set_frequency(f0)
         self.goertzel.set_frequency(f0)
+        self._neighbors = [Goertzel(f, self.fs, self.block_size) for f in neighbor_frequencies(f0, self.fs)]
 
     def reset(self, keep_timing: bool = False) -> None:
         """Start over: clear filter state, detector trackers and decoded text.

@@ -57,7 +57,7 @@ from morse.dsp import Goertzel  # noqa: E402
 from morse.pipeline import decode_samples, load_wav  # noqa: E402
 from morse.runs import Run  # noqa: E402
 from morse.table import encode  # noqa: E402
-from morse.tone_detector import ToneDetector, is_tonal  # noqa: E402
+from morse.tone_detector import ToneDetector, combine_db, is_tonal, neighbor_frequencies  # noqa: E402
 
 __all__ = [
     "build_cases",
@@ -367,7 +367,9 @@ def build_fixture(stem: str, f0: float) -> dict[str, Any]:
     series = [goertzel.power_db(block) for block in blocks]
     levels = [float(10.0 * np.log10(float(np.mean(np.square(block, dtype=np.float64))) + 1e-12))
               for block in blocks]
-    tonal = [is_tonal(p, lvl) for p, lvl in zip(series, levels)]
+    neighbors = [Goertzel(f, fs, BLOCK_SIZE) for f in neighbor_frequencies(f0, fs)]
+    neighbor_series = [combine_db([g.power_db(block) for g in neighbors]) for block in blocks]
+    tonal = [is_tonal(p, lvl, neighbor_db=nb) for p, lvl, nb in zip(series, levels, neighbor_series)]
 
     decoder = MorseDecoder()
     runs = _detector_runs(series, decoder, tonal)
@@ -388,6 +390,7 @@ def build_fixture(stem: str, f0: float) -> dict[str, Any]:
         "blocks": len(series),
         "power_db": rounded,
         "level_dbfs": [round(value, 1) for value in levels],
+        "neighbor_db": [round(value, 1) for value in neighbor_series],
         "tonal": [int(flag) for flag in tonal],
         "runs": [[run.on, run.blocks] for run in runs],
         "runs_from_rounded_power_db_identical": _detector_runs(rounded, tonal=tonal) == runs,

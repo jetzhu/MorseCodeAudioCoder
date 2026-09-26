@@ -866,3 +866,59 @@ def test_non_tonal_blocks_teach_the_noise_level_but_never_switch_on():
     assert det.state is True, "the same power, tonal, does switch ON"
     det.update(-40.0, tonal=False)
     assert det.state is True, "while ON the flag is ignored: a click does not chop the mark"
+
+
+# -- neighbour-band filter (v0.1.20) -----------------------------------------------
+
+
+def test_neighbor_helpers_and_peakiness_rule() -> None:
+    from morse.tone_detector import NEIGHBOR_OFFSETS_HZ, PEAKINESS_MIN_DB, combine_db, is_tonal, neighbor_frequencies
+
+    assert NEIGHBOR_OFFSETS_HZ == (-600.0, -300.0, 300.0, 600.0) and PEAKINESS_MIN_DB == 8.0
+    assert neighbor_frequencies(2491.0, 48000) == [1891.0, 2191.0, 2791.0, 3091.0]
+    assert neighbor_frequencies(400.0, 48000) == [100.0, 700.0, 1000.0]
+    assert neighbor_frequencies(23800.0, 48000) == [23200.0, 23500.0]
+    assert abs(combine_db([-10.0, -10.0]) + 10.0) < 1e-9
+    assert abs(combine_db([0.0, -100.0]) - 10 * math.log10(0.5)) < 1e-6
+    assert combine_db([]) == -math.inf
+    assert is_tonal(-10.0, -13.0) is True
+    assert is_tonal(-10.0, -13.0, neighbor_db=-40.0) is True
+    assert is_tonal(-10.0, -13.0, neighbor_db=-15.0) is False  # only 5 dB above its neighbours
+    assert is_tonal(-40.0, -13.0, neighbor_db=-90.0) is False  # tonality still required
+
+
+def test_band_limited_noise_bursts_no_longer_decode_as_e_or_t() -> None:
+    # A phone's microphone is band-limited, so a click concentrates its energy;
+    # before the neighbour-band test these bursts leaked as E and T.
+    from scipy.signal import butter, sosfilt
+
+    from morse.pipeline import decode_samples
+
+    fs, f0 = 48000, 2491.0
+    rng = np.random.default_rng(1)
+    for lo, hi in [(100, 8000), (100, 4000), (1000, 4000)]:
+        x = 0.0005 * rng.standard_normal(fs * 30)
+        sos = butter(4, [lo, hi], btype="band", fs=fs, output="sos")
+        for k in range(20):
+            start, n = int((1.0 + k * 1.4) * fs), int(0.04 * fs)
+            burst = sosfilt(sos, rng.standard_normal(n + 2000))[2000:] * 0.3
+            x[start:start + n] += burst * np.hanning(n) * 1.5
+        text, _ = decode_samples(x.astype(np.float32), fs, f0)
+        assert text.strip() == "", (lo, hi, text)
+
+
+def test_a_keyed_tone_with_band_limited_noise_still_decodes() -> None:
+    from scipy.signal import butter, sosfilt
+
+    from morse.pipeline import decode_samples
+    from morse.player import build_timing, render_tone
+
+    fs, f0 = 48000, 2491.0
+    tone = render_tone(build_timing("PARIS", 12), f0, fs=fs, amplitude=0.2)
+    rng = np.random.default_rng(3)
+    lead = np.zeros(fs, dtype=np.float32)
+    x = np.concatenate([lead, tone, np.zeros(2 * fs, dtype=np.float32)])
+    sos = butter(4, [100, 8000], btype="band", fs=fs, output="sos")
+    x = x + (0.01 * sosfilt(sos, rng.standard_normal(x.size))).astype(np.float32)
+    text, _ = decode_samples(x.astype(np.float32), fs, f0)
+    assert text.strip() == "PARIS"

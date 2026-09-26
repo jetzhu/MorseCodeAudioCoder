@@ -84,6 +84,12 @@ class BlockMeter extends AudioWorkletProcessor {
   setFrequency(f0) {
     this.f0 = f0;
     this.coeff = 2.0 * Math.cos((2.0 * Math.PI * f0) / sampleRate);
+    // Neighbour bands at f0 +-300 and +-600 Hz (NEIGHBOR_OFFSETS_HZ in detector.js);
+    // a worklet cannot share the module, so the offsets are repeated here.
+    this.nbCoeffs = [-600, -300, 300, 600]
+      .map((d) => f0 + d)
+      .filter((f) => f > 0 && f < sampleRate / 2)
+      .map((f) => 2.0 * Math.cos((2.0 * Math.PI * f) / sampleRate));
   }
 
   /** @param {unknown} msg */
@@ -151,7 +157,22 @@ class BlockMeter extends AudioWorkletProcessor {
     }
     const mag2 = s1 * s1 + s2 * s2 - coeff * s1 * s2;
     const power = (4.0 * mag2) / (n * n);
+    let nbSum = 0.0;
+    const nb = this.nbCoeffs || [];
+    for (const c of nb) {
+      let a1 = 0.0;
+      let a2 = 0.0;
+      if (!this.blockBad) {
+        for (let i = 0; i < n; i++) {
+          const a0 = x[i] + (c * a1 - a2);
+          a2 = a1;
+          a1 = a0;
+        }
+      }
+      nbSum += 10.0 ** (10.0 * Math.log10((4.0 * (a1 * a1 + a2 * a2 - c * a1 * a2)) / (n * n) + DB_FLOOR) / 10.0);
+    }
     this.port.postMessage({
+      neighborDb: nb.length ? 10.0 * Math.log10(nbSum / nb.length) : null,
       powerDb: 10.0 * Math.log10(power + DB_FLOOR),
       rmsDb: 10.0 * Math.log10(sumSq / n + DB_FLOOR),
       blockIndex: this.blockIndex,

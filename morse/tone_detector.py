@@ -57,7 +57,16 @@ import math
 
 from morse.runs import Run
 
-__all__ = ["ToneDetector", "TONALITY_MIN_DB", "is_tonal", "tonality_db"]
+__all__ = [
+    "NEIGHBOR_OFFSETS_HZ",
+    "PEAKINESS_MIN_DB",
+    "TONALITY_MIN_DB",
+    "ToneDetector",
+    "combine_db",
+    "is_tonal",
+    "neighbor_frequencies",
+    "tonality_db",
+]
 
 _DB_FLOOR = 1e-12
 """Added to linear power before ``log10`` (matches ``morse.dsp.Goertzel.power_db``)."""
@@ -406,12 +415,43 @@ def tonality_db(power_db: float, level_dbfs: float) -> float:
     return power_db - level_dbfs - _PURE_TONE_OFFSET_DB
 
 
-def is_tonal(power_db: float, level_dbfs: float, min_tonality_db: float = TONALITY_MIN_DB) -> bool:
-    """Whether a block's energy is concentrated in the tone bin: the ``tonal`` flag for ``update``.
+NEIGHBOR_OFFSETS_HZ: tuple[float, ...] = (-600.0, -300.0, 300.0, 600.0)
+"""Where the neighbour bands sit relative to ``f0``: beyond the 10 ms block's main lobe (100 Hz)."""
 
-    A beeper block scores near 0 dB, white noise or a keyboard click near
-    -24 dB; the default threshold sits at -15 dB.  A block that fails is a
-    broadband transient: it may teach the detector the noise level but must
-    never switch it ON.  Mirrored by ``isTonal`` in ``web/js/detector.js``.
+PEAKINESS_MIN_DB: float = 8.0
+"""A tone block must stand this far above the mean of its neighbour bands."""
+
+
+def neighbor_frequencies(f0: float, fs: float) -> list[float]:
+    """The neighbour-band frequencies for ``f0``, leaving out any outside ``0 < f < fs/2``."""
+    return [f0 + d for d in NEIGHBOR_OFFSETS_HZ if 0.0 < f0 + d < fs / 2.0]
+
+
+def combine_db(values_db: "list[float] | tuple[float, ...]") -> float:
+    """Mean power of several bands, in dB (the mean is taken in linear power)."""
+    if not values_db:
+        return -math.inf
+    return 10.0 * math.log10(sum(10.0 ** (v / 10.0) for v in values_db) / len(values_db))
+
+
+def is_tonal(power_db: float, level_dbfs: float, min_tonality_db: float = TONALITY_MIN_DB,
+             neighbor_db: float | None = None, min_peakiness_db: float = PEAKINESS_MIN_DB) -> bool:
+    """Whether a block is tone rather than noise: the ``tonal`` flag for ``update``.
+
+    Two tests, both needed. Tonality: the tone bin must hold a fair share of
+    the block's energy (a beeper scores near 0 dB, full-band white noise or a
+    click near -24 dB; threshold -15 dB). Peakiness, when ``neighbor_db`` (the
+    mean power of the bands at ``f0 +-300`` and ``+-600`` Hz, see
+    :func:`combine_db`) is given: the tone bin must stand ``min_peakiness_db``
+    above its neighbours. The first test alone fails on a phone, whose
+    microphone path is band-limited to 8 kHz or less, so the same click puts
+    a larger share into the tone bin; noise of any bandwidth is about as
+    strong beside ``f0`` as at it, while a beeper is a sharp peak. A block
+    that fails may teach the detector the noise level but never switches it
+    ON. Mirrored by ``isTonal`` in ``web/js/detector.js``.
     """
-    return tonality_db(power_db, level_dbfs) >= min_tonality_db
+    if tonality_db(power_db, level_dbfs) < min_tonality_db:
+        return False
+    if neighbor_db is None:
+        return True
+    return power_db - neighbor_db >= min_peakiness_db
