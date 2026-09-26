@@ -491,6 +491,14 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Light-link fixes (2026-09-26, v0.1.19): "Send at … WPM" beside the link
+  test (mirrors the encoder speed, which on phones is now shown without
+  More); a Clear button in the Decoded panel header; the camera locks
+  exposure, white balance and focus (`CameraInput.lockExposure`, after 1.5 s
+  of automatic settling, where `getCapabilities()` offers "manual"), shown in
+  the Camera strip with a Re-lock exposure button; the link check only blames
+  speed when at least 30 % came through, and reports camera fps, levels and
+  exposure with the result.
 - Show panels (2026-09-26, v0.1.18; replaces the v0.1.17 handset-only
   Audio / Light switch): in both layouts, Show Audio and Show Light hide or
   show the audio panels (spectrum, tone power, input level; on phones also

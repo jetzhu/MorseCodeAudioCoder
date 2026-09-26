@@ -36,7 +36,9 @@ export function gradeLink(text, { wpm = 0, fps = 0 } = {}) {
   if (s.perfect) advice = "Link good.";
   else if (!received) advice = "Nothing arrived: check that the other lamp or speaker is in view (tap it in the camera preview) and that this device is listening.";
   else if (s.accuracy >= 0.75) advice = `Nearly there: hold both devices steadier, or slow down${wpm ? ` from ${Math.round(wpm)} WPM` : ""}.`;
-  else if (fps && wpm > 0.4 * fps) advice = `Too fast for a ${Math.round(fps)} fps camera: send at ${Math.floor(0.4 * fps)} WPM or less.`;
+  // The speed the decoder measured is only trustworthy when much of the text came through.
+  else if (s.accuracy >= 0.3 && fps && wpm > 0.4 * fps) advice = `Too fast for a ${Math.round(fps)} fps camera: send at ${Math.floor(0.4 * fps)} WPM or less.`;
+  else if (fps) advice = `Many errors: aim at the lamp and press Re-lock exposure, tap the middle of the lamp in the preview, keep both phones still, and send at ${Math.min(8, Math.floor(0.4 * fps))} WPM or less.`;
   else advice = "Many errors: move closer, dim the room, turn the sending screen's brightness up, or slow down.";
   return { received, accuracy: s.accuracy, correct: s.correct, total: s.total, perfect: s.perfect, advice };
 }

@@ -28,6 +28,10 @@ test("grades and advises", () => {
   assert.equal(near.perfect, false);
   assert.match(near.advice, /Nearly there.*12 WPM/);
   assert.match(gradeLink("").advice, /Nothing arrived/);
-  assert.match(gradeLink("EE TTE", { wpm: 16, fps: 30 }).advice, /Too fast for a 30 fps camera: send at 12 WPM/);
-  assert.match(gradeLink("EE TTE", { wpm: 8, fps: 30 }).advice, /Many errors/);
+  assert.match(gradeLink("VVV PAR", { wpm: 16, fps: 30 }).advice, /Too fast for a 30 fps camera: send at 12 WPM/);
+  // Garbage: the measured speed means nothing, so no speed verdict; exposure advice instead.
+  const garbage = gradeLink("X ST ST P A G N S", { wpm: 14, fps: 25 });
+  assert.doesNotMatch(garbage.advice, /Too fast/);
+  assert.match(garbage.advice, /Re-lock exposure.*8 WPM or less/);
+  assert.match(gradeLink("EE TTE", { wpm: 8 }).advice, /Many errors: move closer/);
 });

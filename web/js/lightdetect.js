@@ -36,8 +36,11 @@ export class LightDetector {
    * @param {number} [options.noiseFactor=8] ... and this many times the median frame-to-frame change
    * @param {number} [options.hiFrac=0.6] switch ON above dark + hiFrac * contrast
    * @param {number} [options.loFrac=0.4] switch OFF below dark + loFrac * contrast
+   * @param {number} [options.warmupMs=1200] frames this soon after the first are ignored: a camera
+   *   that has just opened sends black or half-exposed frames before the picture settles
    */
-  constructor({ windowMs = 6000, minContrast = 12, noiseFactor = 8, hiFrac = 0.6, loFrac = 0.4 } = {}) {
+  constructor({ windowMs = 6000, minContrast = 12, noiseFactor = 8, hiFrac = 0.6, loFrac = 0.4, warmupMs = 1200 } = {}) {
+    this.warmupMs = warmupMs;
     this.windowMs = windowMs;
     this.minContrast = minContrast;
     this.noiseFactor = noiseFactor;
@@ -80,8 +83,9 @@ export class LightDetector {
     if (!Number.isFinite(v) || !Number.isFinite(t)) return [];
     const prev = this._prev;
     if (prev && t <= prev.t) return []; // out of order or duplicate frame
-    this.frames += 1;
     if (this._firstT === null) this._firstT = t;
+    if (t - this._firstT < this.warmupMs) return [];
+    this.frames += 1;
     if (this._runStart === null) this._runStart = t;
     const s = this._samples;
     s.push({ t, v });
@@ -91,8 +95,14 @@ export class LightDetector {
     const c = this.bright - this.dark;
     const hi = this.dark + this.hiFrac * c;
     const lo = this.dark + this.loFrac * c;
+    // A frame far outside the range seen so far (the first flash after a
+    // quiet, drifting scene) means the levels are not known yet: its own
+    // pair enters the bright level on the next frame, and the edge is walked
+    // back to it then, so waiting costs no timing.
+    const outside = v > this.bright + c || v < this.dark - c;
     let next = this.state;
     if (!this.contrastOk) next = false;
+    else if (outside) next = this.state;
     else if (!this.state && v > hi) next = true;
     else if (this.state && v < lo) next = false;
     this._prev = { t, v };
@@ -147,6 +157,7 @@ export class LightDetector {
     }
     let bright = -Infinity;
     let dark = Infinity;
+    let jump = 0;
     const diffs = [];
     for (let i = 1; i < s.length; i++) {
       const a = s[i - 1].v;
@@ -154,13 +165,16 @@ export class LightDetector {
       bright = Math.max(bright, Math.min(a, b));
       dark = Math.min(dark, Math.max(a, b));
       diffs.push(Math.abs(b - a));
+      if (i >= 2) jump = Math.max(jump, Math.abs(b - s[i - 2].v));
     }
     diffs.sort((x, y) => x - y);
     this.noise = diffs[Math.floor(diffs.length / 2)];
     this.bright = bright;
     this.dark = dark;
     const c = bright - dark;
-    this.contrastOk = c >= this.minContrast && c >= this.noiseFactor * this.noise;
+    // A lamp switches within a frame or two; the camera's exposure settling or
+    // a cloud passing drifts over many. Only a sudden change counts as signal.
+    this.contrastOk = c >= this.minContrast && c >= this.noiseFactor * this.noise && jump >= 0.5 * c;
   }
 }
 

@@ -263,6 +263,7 @@
       <span class="linkcheck">
         <button class="ctl" id="linkSend" type="button" title="Send VVV PARIS 73 on the selected channels, for another device to check">Send link test</button>
         <button class="ctl" id="linkCheck" type="button" title="Listen for VVV PARIS 73 from another device and grade what arrives">Check link</button>
+        <span class="field" title="Sending speed for Play, the key, the chart and the link test (the encoder speed)"><label for="linkWpm">Send at</label><input id="linkWpm" class="ctl mono small" type="number" value="8" min="2" max="40" step="1" aria-label="Sending speed in words per minute"> <span class="mono unit">WPM</span></span>
         <span class="linkresult" id="linkResult" aria-live="polite"></span>
       </span>
     </div>
@@ -303,7 +304,7 @@
         </section>
 
         <section class="panel" aria-label="Decoded text">
-          <header>Decoded <span>· letters appear at each gap, a long gap adds a space</span><span class="tag">C</span></header>
+          <header>Decoded <span>· letters appear at each gap, a long gap adds a space</span><button class="ctl hdrbtn" id="clearDecoded" type="button" title="Clear the decoded text; timing estimates are kept">Clear</button><span class="tag">C</span></header>
           <div class="decoded">
             <div class="tape">
               <div class="live">
@@ -369,7 +370,9 @@
           <div class="ro"><span class="k">Dark · bright</span><span class="v mono" id="camRange">—</span></div>
           <div class="ro"><span class="k">Frame rate</span><span class="v mono" id="camFps">—<small>fps</small></span></div>
           <div class="ro"><span class="k">Top speed</span><span class="v mono" id="camMax">—<small>WPM</small></span></div>
-          <div class="tip">A camera sees about 30 frames a second, so a dit needs to last a few frames: about 12 WPM at most, 8 WPM is comfortable. Hold the phone steady, tap the other screen's lamp, and keep the light source out of direct sun.</div>
+          <div class="ro"><span class="k">Exposure</span><span class="v mono" id="camExp">—</span></div>
+          <button class="ctl" id="camRelock" type="button" title="Let the camera adjust to the scene for a moment, then hold its exposure still">Re-lock exposure</button>
+          <div class="tip">A camera sees about 30 frames a second, so a dit needs to last a few frames: about 12 WPM at most, 8 WPM is comfortable. Hold the phone steady and tap the other screen's lamp. The exposure is locked a moment after the camera opens so the phone does not darken the picture every time the lamp lights; aim at the lamp first, then press Re-lock exposure. Keep the light out of direct sun.</div>
         </div>
       </div>
     </section>

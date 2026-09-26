@@ -227,7 +227,7 @@ body.view-handset.hide-audio .timing { display: none; }
 body.view-handset .timing { border-left: 0; border-top: 1px solid var(--line); }
 body.view-handset .text { font-size: 22px; }
 body.view-handset .enc-right { display: none; }
-body.view-handset:not(.more-open) .enc-controls > :not(#encPlay) { display: none; }
+body.view-handset:not(.more-open) .enc-controls > :not(#encPlay):not(.field:has(#encWpm)) { display: none; }
 body.view-handset .enc-guide { height: 30px; }
 body.view-handset .keystrip .keyhelp, body.view-handset .keystrip #keyReset, body.view-handset .keystrip .rebind,
 body.view-handset:not(.more-open) .keystrip .keyerrow, body.view-handset:not(.more-open) .keystrip .field:has(#keySidetone) { display: none; }
@@ -302,6 +302,9 @@ a.star .starcount:not(:empty)::before { content: " · "; }
   font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); font-weight: 500;
 }
 .panel header span { text-transform: none; letter-spacing: 0; color: var(--ink-3); font-weight: 400; }
+.panel header .hdrbtn, .encode header .hdrbtn { margin-left: auto; height: 22px; padding: 0 9px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.panel header .hdrbtn + .tag { margin-left: 8px; }
+.ctl.mono.small { width: 58px; }
 .panel header .tag {
   margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11px;
   width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;

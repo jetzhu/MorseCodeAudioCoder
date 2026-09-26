@@ -38,6 +38,8 @@ export class CameraInput {
     /** @type {((err: Error) => void) | null} */
     this.onEnded = null;
     this.label = "";
+    /** "locked", "settling" or "auto" (the camera does not let the page hold it). */
+    this.exposure = "";
     this._canvas = null;
     this._ctx = null;
     this._handle = null;
@@ -81,6 +83,45 @@ export class CameraInput {
     this._ctx = this._canvas.getContext("2d", { willReadFrequently: true });
     this._running = true;
     this._schedule();
+    this.lockExposure(1500);
+  }
+
+  /**
+   * Automatic exposure darkens the whole picture each time a bright lamp
+   * lights, which cuts marks short and blurs gaps. After `settleMs` of
+   * automatic adjustment, hold exposure, white balance and focus still where
+   * the camera allows it (Chrome on Android does; many laptops and iPhones do
+   * not). Resolves to "locked", "auto" (not supported) or "" when stopped.
+   * @param {number} [settleMs=1500]
+   */
+  async lockExposure(settleMs = 1500) {
+    const track = this.track;
+    if (!track || typeof track.applyConstraints !== "function") {
+      this.exposure = "auto";
+      return this.exposure;
+    }
+    const caps = typeof track.getCapabilities === "function" ? track.getCapabilities() : {};
+    const modes = (name) => (Array.isArray(caps[name]) ? caps[name] : []);
+    const lockable = ["exposureMode", "whiteBalanceMode", "focusMode"].filter((k) => modes(k).includes("manual"));
+    if (!lockable.length) {
+      this.exposure = "auto";
+      return this.exposure;
+    }
+    this.exposure = "settling";
+    try {
+      await track.applyConstraints({ advanced: lockable.map((k) => ({ [k]: modes(k).includes("continuous") ? "continuous" : "manual" })) });
+    } catch {
+      /* ignore: we lock below anyway */
+    }
+    await new Promise((r) => setTimeout(r, settleMs));
+    if (!this._running || this.track !== track) return "";
+    try {
+      await track.applyConstraints({ advanced: lockable.map((k) => ({ [k]: "manual" })) });
+      this.exposure = "locked";
+    } catch {
+      this.exposure = "auto";
+    }
+    return this.exposure;
   }
 
   stop() {

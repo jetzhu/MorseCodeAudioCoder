@@ -194,3 +194,34 @@ test("frameTime prefers the capture time over the callback time", async () => {
   assert.equal(frameTime(500, { captureTime: 0 }), 500);
   assert.equal(frameTime(500, undefined), 500);
 });
+
+/** A camera whose automatic exposure chases the frame's mean brightness with time constant tau. */
+function aeFrames(text, wpm, { tau = 300, cover = 0.5, fps = 25, lead = 2000, tail = 3000 } = {}) {
+  const timing = buildTiming(text, wpm);
+  const total = timing.reduce((s, x) => s + x.ms, 0);
+  const out = [];
+  let g = 1;
+  const dt = 1000 / fps;
+  for (let t = 0; t < lead + total + tail; t += dt) {
+    const spot = timingStateAt(timing, t - lead) ? 1 : 0.12;
+    const mean = (1 - cover) * 0.25 + cover * spot;
+    g += (0.5 / mean - g) * (1 - Math.exp(-dt / tau));
+    out.push({ t, value: Math.min(255, 200 * g * spot) });
+  }
+  return out;
+}
+
+test("automatic exposure settling at the start is not a mark; exposure chasing the lamp still decodes", () => {
+  for (const tau of [300, 800]) {
+    for (const cover of [0.1, 0.5, 0.9]) {
+      assert.equal(decode(aeFrames("VVV PARIS 73", 8, { tau, cover })).text, "VVV PARIS 73", `tau ${tau} cover ${cover}`);
+    }
+  }
+});
+
+test("the black and half-exposed frames of a camera that has just opened are ignored", () => {
+  const fr = frames("SOS", 8, { lead: 3000, seed: 21 });
+  // The first 0.8 s: black, then a jump to the scene, as a real camera starts.
+  for (const f of fr) if (f.t < 800) f.value = f.t < 400 ? 0 : 20;
+  assert.equal(decode(fr).text, "SOS");
+});

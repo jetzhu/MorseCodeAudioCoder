@@ -149,7 +149,8 @@ const el = {
   viewDesktop: $("viewDesktop"), viewHandset: $("viewHandset"), moreBtn: $("moreBtn"),
   showAudio: $("showAudio"), showLight: $("showLight"),
   camStrip: $("camStrip"), camView: $("camView"), camVideo: $("camVideo"), camSpot: $("camSpot"),
-  linkSend: $("linkSend"), linkCheck: $("linkCheck"), linkResult: $("linkResult"),
+  linkSend: $("linkSend"), linkCheck: $("linkCheck"), linkResult: $("linkResult"), linkWpm: $("linkWpm"),
+  clearDecoded: $("clearDecoded"), camExp: $("camExp"), camRelock: $("camRelock"),
   camPill: $("camPill"), camLevel: $("camLevel"), camRange: $("camRange"), camFps: $("camFps"), camMax: $("camMax"),
   f0Label: $("f0Label"), specInfo: $("specInfo"),
   sym: $("symBuf"), hint: $("symHint"), text: $("textOut"),
@@ -593,6 +594,8 @@ function drawCamera() {
   const fps = lightDet.fps;
   el.camFps.innerHTML = `${fps ? fps.toFixed(0) : "—"}<small>fps</small>`;
   el.camMax.innerHTML = `${fps ? Math.floor(0.4 * fps) : "—"}<small>WPM</small>`;
+  const exp = camera ? camera.exposure : "";
+  el.camExp.textContent = exp === "locked" ? "locked" : exp === "settling" ? "settling…" : exp === "auto" ? "automatic (phone does not allow a lock)" : "—";
   const cv = fit(canvases.camCanvas);
   const { ctx, w, h } = cv;
   ctx.clearRect(0, 0, w, h);
@@ -1385,6 +1388,7 @@ function buildEncoding() {
   keyer.setSpeed(1200 / wpm);
   updateKeyReadouts();
   el.chipTorch.textContent = torchLimits() && typed > TORCH_MAX_WPM ? `Torch · ${TORCH_MAX_WPM} WPM` : "Torch";
+  if (document.activeElement !== el.linkWpm) el.linkWpm.value = String(typed);
   const farnsRaw = parseFloat(el.encFarns.value);
   encoder.farnsworth = Number.isFinite(farnsRaw) && farnsRaw >= 2 && farnsRaw < wpm ? farnsRaw : null;
   encoder.text = el.encIn.value;
@@ -2097,7 +2101,10 @@ function finishLinkCheck() {
   const got = decoder.text.slice(Math.min(link.from, decoder.text.length));
   const g = gradeLink(got, { wpm: decoder.ditMs > 0 ? 1200 / decoder.ditMs : 0, fps: camLive() && arbiter.owner === "camera" ? lightDet.fps : 0 });
   const pct = Math.round(100 * g.accuracy);
-  setLinkResult(`${pct}% (${g.correct}/${g.total})${g.received ? ` · "${g.received}"` : ""} · ${g.advice}`, g.perfect ? "good" : "bad");
+  const cam = camLive() && arbiter.owner === "camera"
+    ? ` · camera ${Math.round(lightDet.fps)} fps, dark ${Math.round(lightDet.dark)} / bright ${Math.round(lightDet.bright)}, exposure ${camera.exposure || "?"}`
+    : "";
+  setLinkResult(`${pct}% (${g.correct}/${g.total})${g.received ? ` · "${g.received}"` : ""} · ${g.advice}${cam}`, g.perfect ? "good" : "bad");
 }
 
 function playReference(ch) {
@@ -2342,6 +2349,18 @@ function wire() {
   });
   el.camView.addEventListener("click", setCamSpot);
   el.linkSend.addEventListener("click", sendLinkTest);
+  el.linkWpm.addEventListener("input", () => {
+    const v = parseFloat(el.linkWpm.value);
+    if (!(v >= 2 && v <= 40)) return;
+    el.encWpm.value = String(Math.round(v));
+    player.stop();
+    buildEncoding();
+  });
+  el.clearDecoded.addEventListener("click", clearText);
+  el.camRelock.addEventListener("click", () => {
+    if (camera && camera.running) camera.lockExposure(1200).then(() => (dirty = true));
+    dirty = true;
+  });
   el.linkCheck.addEventListener("click", toggleLinkCheck);
   el.lightFullBtn.addEventListener("click", requestFullLight);
   el.lightFull.addEventListener("click", exitFullLight);
