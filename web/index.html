@@ -95,6 +95,14 @@
   "mainEntity": [
     {
       "@type": "Question",
+      "name": "Can it read Morse code from a flashing light?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Select Camera under Listen with, press Start, and tap the light in the camera preview: a phone screen in full-screen light mode, a torch or a lamp. Its brightness is decoded frame by frame, up to about 12 words per minute at 30 frames a second. Two phones can talk this way, each sending with its screen and receiving with its camera."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Is this a Morse code simulator?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -237,7 +245,7 @@
     <div class="chipbar" id="channelBar" aria-label="Channels">
       <div class="chipgroup" role="group" aria-label="Listen with"><span class="chiplabel">Listen with</span>
         <button class="chip" id="chipMic" type="button" aria-pressed="true" title="Decode what the microphone hears">Microphone</button>
-        <button class="chip" id="chipCamera" type="button" aria-pressed="false" disabled title="Decode a flashing light through the camera: next release">Camera</button>
+        <button class="chip" id="chipCamera" type="button" aria-pressed="true" title="Decode a flashing light through the camera (the rear one on phones)">Camera</button>
       </div>
       <div class="chipgroup" role="group" aria-label="Send with"><span class="chiplabel">Send with</span>
         <button class="chip" id="chipAudio" type="button" aria-pressed="true" title="Play and the key sound through the speakers">Audio</button>
@@ -336,6 +344,24 @@
         </div>
       </aside>
     </div>
+
+    <section class="encode camstrip" id="camStrip" aria-label="Camera" hidden>
+      <header>Camera <span>· tap the light to follow; its brightness is decoded like the tone</span><span class="tag">H</span></header>
+      <div class="enc-body">
+        <div class="enc-left camleft">
+          <div class="camview" id="camView" title="Tap the light to follow"><video id="camVideo" playsinline muted></video><div class="camspot" id="camSpot"></div></div>
+          <div class="camtrace"><canvas id="camCanvas"></canvas></div>
+        </div>
+        <div class="enc-right readouts">
+          <div class="ro"><span class="k">Light</span><span id="camPill" class="pill"><i></i>OFF</span></div>
+          <div class="ro"><span class="k">Brightness</span><span class="v mono" id="camLevel">—</span></div>
+          <div class="ro"><span class="k">Dark · bright</span><span class="v mono" id="camRange">—</span></div>
+          <div class="ro"><span class="k">Frame rate</span><span class="v mono" id="camFps">—<small>fps</small></span></div>
+          <div class="ro"><span class="k">Top speed</span><span class="v mono" id="camMax">—<small>WPM</small></span></div>
+          <div class="tip">A camera sees about 30 frames a second, so a dit needs to last a few frames: about 12 WPM at most, 8 WPM is comfortable. Hold the phone steady, tap the other screen's lamp, and keep the light source out of direct sun.</div>
+        </div>
+      </div>
+    </section>
 
     <section class="encode" aria-label="Encode a message">
       <header>Encode <span>· type a message, read it as Morse, follow the keying guide or play it</span><span class="tag">D</span></header>
@@ -538,7 +564,7 @@
     <div class="note"><span class="tag">E</span><div><h3>Key</h3><p>Send Morse yourself. Single key: hold Space or the big button and the tone sounds while held, exactly like a straight key. Two keys: the left arrow sends dits and the right arrow dahs, timed at the encoder speed and repeating while held, like an electronic keyer, in iambic mode A or B. Bug: automatic dits, hand-made dahs, like a Vibroplex. Dah ratio (dits per dah) and weight (longer marks, shorter spaces) shape the elements. Change key under a button picks any other keyboard key, and the choice is kept in this browser. The sidetone is the pitch you hear (600 Hz by default, easier on the ear than a 2.5 kHz beeper); the decoder is always fed the beeper frequency. The Sent line reads back what you keyed even when the decoder is not listening.</p></div></div>
     <div class="note"><span class="tag">F</span><div><h3>Practice</h3><p>Pick a drill, press Next target, key the word with the Key strip. When the Sent line matches, the target is marked correct; otherwise press Check to see the edit distance, your speed and how far your marks and gaps sit from the ideal proportions. Show the code reveals the dots and dashes while you learn.</p></div></div>
     <div class="note"><span class="tag">G</span><div><h3>Reference</h3><p>A Morse code chart built from the same table the decoder and encoder use: letters, digits and punctuation with their dots and dashes. Open it with Show chart. As you key, or as the decoder builds a letter, every character the dots and dashes so far could still become lights up and the exact match stands out, so you can see where a letter is heading. Click a character to hear it at the encoder speed.</p></div></div>
-    <div class="note"><span class="tag">•</span><div><h3>Listen with, Send with</h3><p>Choose any combination of channels. Listening: the microphone now, the camera in a coming release. Sending: audio through the speakers, the signal lamp on screen (or the whole screen with Full-screen light, for sending across a room), the phone's vibration motor on Android, and the torch in a coming release. Only selected channels take part, everything a device supports starts selected, and the choice is remembered. The lamp shows an amber ring while a mark is being received and a white fill while one is being sent, so a hearing-impaired person can follow both directions. <b>Handset</b> in the title bar switches to a compact layout for phones: lamp, key and text, with the rest behind More.</p></div></div>
+    <div class="note"><span class="tag">•</span><div><h3>Listen with, Send with</h3><p>Choose any combination of channels. Listening: the microphone, and the camera, which follows a light you tap in its preview and decodes its brightness the same way as the tone (up to about 12 WPM at 30 frames a second). When both hear the same message, the first to start a mark owns it until it has been quiet for a couple of seconds, so nothing is decoded twice. Sending: audio through the speakers, the signal lamp on screen (or the whole screen with Full-screen light, for sending across a room), the phone's vibration motor on Android, and the torch in a coming release. Only selected channels take part, everything a device supports starts selected, and the choice is remembered. The lamp shows an amber ring while a mark is being received and a white fill while one is being sent, so a hearing-impaired person can follow both directions. <b>Handset</b> in the title bar switches to a compact layout for phones: lamp, key and text, with the rest behind More.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Right rail</h3><p>Input level in dBFS with a peak-hold tick, a 6 ms slice of the band-passed input so a dead microphone is obvious at once, and the key numbers as readouts. The detector pill lights amber on every mark.</p></div></div>
     <div class="note"><span class="tag">•</span><div><h3>Chopped signal</h3><p>Chromium browsers (Edge, Chrome) open the microphone in Windows raw mode when a page turns processing off, so the beeper arrives clean. Firefox gets the shared, processed signal: Windows noise suppression removes a steady tone after about 50 ms and echo cancellation removes the machine's own output, so slow beeps decode as T and Play is never heard. If marks arrive as fragments the page says so. Use Edge or Chrome, turn off Audio enhancements for the microphone in Windows Sound settings, use a USB headset, or run the desktop app.</p></div></div>
   </div>
@@ -593,6 +619,7 @@
     </div>
     <h2 id="faqTitle">Frequently asked questions</h2>
     <div class="faq">
+      <div class="qa"><h3>Can it read Morse code from a flashing light?</h3><p>Yes. Select Camera under Listen with, press Start, and tap the light in the camera preview: a phone screen in full-screen light mode, a torch or a lamp. Its brightness is decoded frame by frame, up to about 12 words per minute at 30 frames a second. Two phones can talk this way, each sending with its screen and receiving with its camera.</p></div>
       <div class="qa"><h3>Is this a Morse code simulator?</h3><p>Yes. It simulates the whole loop: a text-to-Morse translator that plays the code, a straight key, iambic keyer and bug you work from the keyboard, and a decoder that reads the result back, plus practice drills and a chart. Everything runs in the browser.</p></div>
       <div class="qa"><h3>Can it translate text to Morse code and back?</h3><p>Both ways. Type text and the encoder shows the Morse and plays it at any speed from 2 to 40 words per minute, with optional Farnsworth spacing. Play a Morse tone at the microphone, or key one yourself, and the decoder turns it back into text.</p></div>
       <div class="qa"><h3>Can I learn Morse code with it?</h3><p>That is what the Key, Practice and Reference strips are for. The chart lights up the characters your dots and dashes could still become as you key, the Practice strip hands out words, call signs and number groups and grades your copy and rhythm, and Farnsworth spacing lets you hear characters at full speed with room between them.</p></div>

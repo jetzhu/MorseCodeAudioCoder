@@ -28,6 +28,8 @@ import { Practice, rhythm, score } from "./practice.js";
 import { cellState, chartEntries } from "./reference.js";
 import { sanitize as sanitizeChannels, vibrationPattern } from "./channels.js";
 import { Lamp } from "./light.js";
+import { CameraInput } from "./camera.js";
+import { LightDetector, SourceArbiter } from "./lightdetect.js";
 import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
@@ -63,6 +65,20 @@ let channels = sanitizeChannels(null);
 /** What this device can do; filled in by initChannels(). */
 const avail = { listen: { mic: false, camera: false }, send: { audio: true, light: true, torch: false, vibrate: false } };
 const listenOn = (k) => Boolean(channels.listen[k] && avail.listen[k]);
+/** The microphone is open and delivering blocks. */
+const micLive = () => Boolean(mic && mic.running);
+
+// Camera listening: the camera's brightness goes through its own detector;
+// the arbiter lets only one source (the first to start a mark) feed the decoder.
+/** @type {CameraInput | null} */
+let camera = null;
+const lightDet = new LightDetector();
+const arbiter = new SourceArbiter();
+/** Brightness history for the trace: {t, v, on}. */
+const camTrace = [];
+const camLive = () => Boolean(camera && camera.running);
+/** Quiet time after which a source gives up the message: 2 s, or 8 dits at slow speeds. */
+const releaseMs = () => Math.max(2000, 8 * decoder.ditMs);
 const sendOn = (k) => Boolean(channels.send[k] && avail.send[k]);
 
 // -------------------------------------------------------------------- helpers
@@ -106,6 +122,8 @@ const el = {
   chipTorch: $("chipTorch"), chipVibrate: $("chipVibrate"), lightFullBtn: $("lightFullBtn"), lightFull: $("lightFull"),
   flashNotice: $("flashNotice"), flashOk: $("flashOk"), flashCancel: $("flashCancel"),
   viewDesktop: $("viewDesktop"), viewHandset: $("viewHandset"), moreBtn: $("moreBtn"),
+  camStrip: $("camStrip"), camView: $("camView"), camVideo: $("camVideo"), camSpot: $("camSpot"),
+  camPill: $("camPill"), camLevel: $("camLevel"), camRange: $("camRange"), camFps: $("camFps"), camMax: $("camMax"),
   f0Label: $("f0Label"), specInfo: $("specInfo"),
   sym: $("symBuf"), hint: $("symHint"), text: $("textOut"),
   dit: $("ditV"), dah: $("dahV"), lgap: $("lgapV"), off: $("offV"),
@@ -133,6 +151,7 @@ const state = {
   f0: DEFAULT_F0,
   supported: true,
   running: false,
+  startedAt: 0, // performance.now() at Start, the clock for camera-only logs
   paused: false,
   starting: false,
   everRan: false,
@@ -225,7 +244,7 @@ function showNote(text, ms = 6000) {
  * @param {import("./audio.js").BlockMessage} m
  */
 function onBlock(m) {
-  if (!state.running) return;
+  if (!state.running || !listenOn("mic")) return;
   if (state.lastBlockIndex >= 0 && m.blockIndex > state.lastBlockIndex + 1) {
     state.dropped += m.blockIndex - state.lastBlockIndex - 1;
     dirty = true;
@@ -243,7 +262,8 @@ const log = new DecodedLog();
 /** Stamp newly decoded text with the audio clock and the computer clock. */
 function logEmit(text) {
   if (!text) return;
-  log.add(text, state.blocks * state.blockMs, Date.now());
+  const audioMs = micLive() ? state.blocks * state.blockMs : performance.now() - (state.startedAt || performance.now());
+  log.add(text, audioMs, Date.now());
   if (text.includes(" ") && log.text.trim()) maybeStarNudge(); // a whole word decoded
 }
 
@@ -281,9 +301,10 @@ async function loadStarCount() {
 /** The `Pipeline.process_block` order: detector, decoder feed, idle, then the display buffers. */
 function processBlock(powerDb, rmsDb) {
   // A loud but broadband block (click, speech) never switches the detector ON.
-  for (const run of detector.update(powerDb, isTonal(powerDb, rmsDb))) feedRun(run);
+  for (const run of detector.update(powerDb, isTonal(powerDb, rmsDb))) feedFrom("mic", run);
   const current = detector.currentRun;
-  if (!current.on) logEmit(decoder.idle(current.ms));
+  arbiter.tick("mic", current.on, current.on ? 0 : current.ms, releaseMs());
+  if (!current.on && arbiter.mayIdle("mic")) logEmit(decoder.idle(current.ms));
   trackFragments(detector.state);
 
   const i = hist.idx;
@@ -301,6 +322,11 @@ function processBlock(powerDb, rmsDb) {
     state.peakHold -= 0.3;
   }
   state.blocks += 1;
+}
+
+/** A run from one listen source: it reaches the decoder only if that source owns the message. */
+function feedFrom(src, run) {
+  if (arbiter.offer(src, run)) feedRun(run);
 }
 
 /** Hand one final run to the decoder and remember marks for the histogram. */
@@ -376,9 +402,11 @@ function resetStreamState() {
 // -------------------------------------------------------------- lifecycle
 
 async function startListening() {
-  if (state.starting || state.running || !state.supported) return;
-  if (!listenOn("mic")) {
-    showNote("Select a source to listen with (Listen with: Microphone).");
+  if (state.starting || state.running) return;
+  const wantMic = listenOn("mic");
+  const wantCam = listenOn("camera");
+  if (!wantMic && !wantCam) {
+    showNote("Select a source to listen with (Listen with: Microphone or Camera).");
     return;
   }
   state.starting = true;
@@ -386,56 +414,201 @@ async function startListening() {
   el.start.textContent = "Starting…";
   hideMessage();
   updateStatus();
-  try {
-    const ac = ensureContext();
-    if (!mic) mic = new MicInput(ac, { f0: state.f0 });
-    mic.onError = (err) => {
-      showMessage(`${err.message}. Press Start to reopen the microphone.`);
-      stopListening();
-    };
-    mic.onEnded = () => {
-      showMessage("The microphone stream ended (device unplugged or taken by another application). Press Start to reopen it.");
-      stopListening();
-    };
-    mic.setFrequency(state.f0);
-    await mic.start(el.dev.value, onBlock, { processing: el.micProc.value === "browser" ? "browser" : "raw" });
-  } catch (err) {
+  const errors = [];
+  let micOk = false;
+  if (wantMic) {
+    try {
+      const ac = ensureContext();
+      if (!mic) mic = new MicInput(ac, { f0: state.f0 });
+      mic.onError = (err) => {
+        showMessage(`${err.message}. Press Start to reopen the microphone.`);
+        stopListening();
+      };
+      mic.onEnded = () => {
+        showMessage("The microphone stream ended (device unplugged or taken by another application). Press Start to reopen it.");
+        stopListening();
+      };
+      mic.setFrequency(state.f0);
+      await mic.start(el.dev.value, onBlock, { processing: el.micProc.value === "browser" ? "browser" : "raw" });
+      micOk = true;
+    } catch (err) {
+      errors.push(describeCaptureError(err));
+    }
+  }
+  let camOk = false;
+  if (wantCam) {
+    try {
+      await startCamera();
+      camOk = true;
+    } catch (err) {
+      errors.push(describeCameraError(err));
+    }
+  }
+  if (!micOk && !camOk) {
     state.starting = false;
-    showMessage(describeCaptureError(err));
+    showMessage(errors.join(" "));
     updateControls();
     updateStatus();
     return;
   }
-  state.fs = mic.sampleRate;
-  state.blockSize = mic.blockSize;
-  state.blockMs = mic.blockMs;
-  state.deviceLabel = mic.deviceLabel;
-  state.micProcessing = mic.appliedProcessing;
-  detector = new ToneDetector({ blockMs: state.blockMs });
+  if (errors.length) showNote(`${errors.join(" ")} Listening with the ${micOk ? "microphone" : "camera"} only.`, 9000);
+  if (micOk) {
+    state.fs = mic.sampleRate;
+    state.blockSize = mic.blockSize;
+    state.blockMs = mic.blockMs;
+    state.deviceLabel = mic.deviceLabel;
+    state.micProcessing = mic.appliedProcessing;
+    detector = new ToneDetector({ blockMs: state.blockMs });
+  }
   resetStreamState();
+  arbiter.release();
+  state.startedAt = performance.now();
   state.running = true;
   state.paused = false;
   state.starting = false;
   state.everRan = true;
   el.pause.textContent = "Pause";
-  syncPlayerFeed(); // a tone already playing reaches the decoder from now on
-  // Permission is granted now, so the device list has labels.
-  await refreshDevices(el.dev.value === "" ? mic.deviceId : el.dev.value);
-  if (state.f0 >= state.fs / 2) applyFrequency(DEFAULT_F0);
+  if (micOk) {
+    syncPlayerFeed(); // a tone already playing reaches the decoder from now on
+    // Permission is granted now, so the device list has labels.
+    await refreshDevices(el.dev.value === "" ? mic.deviceId : el.dev.value);
+    if (state.f0 >= state.fs / 2) applyFrequency(DEFAULT_F0);
+  }
   updateControls();
   updateStatus();
   dirty = true;
 }
 
+// ------------------------------------------------------------------ camera
+
+function describeCameraError(err) {
+  const name = err && err.name;
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") return "Camera access was denied; allow it for this site to decode light.";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "No camera was found.";
+  if (name === "NotReadableError") return "The camera is in use by another application.";
+  return `The camera could not be opened: ${(err && err.message) || err}.`;
+}
+
+async function startCamera() {
+  if (!camera) {
+    camera = new CameraInput(el.camVideo);
+    camera.onFrame = onCameraFrame;
+    camera.onEnded = () => {
+      showNote("The camera stream ended.");
+      stopCamera();
+      updateStatus();
+    };
+    el.camVideo.addEventListener("loadedmetadata", sizeCamView);
+  }
+  lightDet.reset();
+  camTrace.length = 0;
+  await camera.start();
+  el.camStrip.hidden = false;
+  sizeCamView();
+  dirty = true;
+}
+
+function stopCamera() {
+  if (!camLive()) return;
+  for (const run of lightDet.flush(performance.now())) feedFrom("camera", run);
+  camera.stop();
+  arbiter.release("camera");
+  el.camStrip.hidden = true;
+  el.camPill.className = "pill";
+  el.camPill.innerHTML = "<i></i>OFF";
+  dirty = true;
+}
+
+/** Match the preview box to the video's shape and size the spot marker like the sampled spot. */
+function sizeCamView() {
+  const v = el.camVideo;
+  if (!(v.videoWidth > 0 && v.videoHeight > 0)) return;
+  el.camView.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`;
+  const frac = camera ? camera.spotFrac : 0.06;
+  const d = (frac * Math.min(v.videoWidth, v.videoHeight)) / v.videoWidth;
+  el.camSpot.style.width = `${Math.max(4, d * 100 * 1.6)}%`;
+}
+
+function onCameraFrame(f) {
+  if (!state.running || state.paused || !listenOn("camera")) return;
+  for (const run of lightDet.update(f.value, f.t)) feedFrom("camera", run);
+  const off = lightDet.currentOffMs(f.t);
+  arbiter.tick("camera", lightDet.state, off, releaseMs());
+  if (off > 0 && arbiter.mayIdle("camera")) logEmit(decoder.idle(off));
+  camTrace.push({ t: f.t, v: f.value, on: lightDet.state });
+  while (camTrace.length && f.t - camTrace[0].t > 10000) camTrace.shift();
+  dirty = true;
+}
+
+function setCamSpot(e) {
+  if (!camera) return;
+  const r = el.camView.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width;
+  const y = (e.clientY - r.top) / r.height;
+  camera.setSpot(x, y);
+  el.camSpot.style.left = `${Math.min(1, Math.max(0, x)) * 100}%`;
+  el.camSpot.style.top = `${Math.min(1, Math.max(0, y)) * 100}%`;
+  lightDet.reset(); // learn the new spot's dark and bright levels afresh
+  camTrace.length = 0;
+}
+
+function drawCamera() {
+  if (el.camStrip.hidden) return;
+  const on = lightDet.state;
+  el.camPill.className = "pill" + (on ? " on" : "");
+  el.camPill.innerHTML = `<i></i>${on ? "ON" : "OFF"}`;
+  el.camSpot.classList.toggle("on", on);
+  const last = camTrace[camTrace.length - 1];
+  el.camLevel.textContent = last ? `${Math.round(last.v)}` : "—";
+  el.camRange.textContent = lightDet.contrastOk ? `${Math.round(lightDet.dark)} · ${Math.round(lightDet.bright)}` : "—";
+  const fps = lightDet.fps;
+  el.camFps.innerHTML = `${fps ? fps.toFixed(0) : "—"}<small>fps</small>`;
+  el.camMax.innerHTML = `${fps ? Math.floor(0.4 * fps) : "—"}<small>WPM</small>`;
+  const cv = fit(canvases.camCanvas);
+  const { ctx, w, h } = cv;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = cssVar("--panel-2");
+  ctx.fillRect(0, 0, w, h);
+  if (!camTrace.length) return;
+  const tEnd = camTrace[camTrace.length - 1].t;
+  const x = (t) => w - ((tEnd - t) / 10000) * w;
+  const stripH = 8;
+  const y = (v) => h - stripH - 4 - (v / 255) * (h - stripH - 10);
+  ctx.fillStyle = cssVar("--on");
+  for (let i = 1; i < camTrace.length; i++) {
+    if (camTrace[i - 1].on) ctx.fillRect(x(camTrace[i - 1].t), h - stripH, Math.max(1, x(camTrace[i].t) - x(camTrace[i - 1].t)), stripH);
+  }
+  if (lightDet.contrastOk) {
+    const c = lightDet.bright - lightDet.dark;
+    ctx.strokeStyle = cssVar("--thr");
+    ctx.setLineDash([4, 3]);
+    for (const level of [lightDet.dark + lightDet.hiFrac * c, lightDet.dark + lightDet.loFrac * c]) {
+      ctx.beginPath();
+      ctx.moveTo(0, y(level) + 0.5);
+      ctx.lineTo(w, y(level) + 0.5);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = cssVar("--trace");
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  camTrace.forEach((p, i) => (i ? ctx.lineTo(x(p.t), y(p.v)) : ctx.moveTo(x(p.t), y(p.v))));
+  ctx.stroke();
+  ctx.lineWidth = 1;
+}
+
 async function stopListening() {
-  if (!mic || !state.running) return;
+  if (!state.running) return;
   state.running = false;
   state.paused = false;
   syncPlayerFeed(); // detach the tone from the bus before the graph is torn down
-  for (const run of detector.flush()) feedRun(run);
+  if (micLive()) for (const run of detector.flush()) feedFrom("mic", run);
+  stopCamera();
   logEmit(decoder.idle(Infinity));
+  arbiter.release();
   finishAuto(false);
-  await mic.stop();
+  if (micLive()) await mic.stop();
   el.pause.textContent = "Pause";
   updateControls();
   updateStatus();
@@ -614,10 +787,11 @@ function updateControls() {
   const running = state.running;
   el.start.textContent = running ? "Stop" : "Start";
   el.start.classList.toggle("running", running);
-  el.start.disabled = !state.supported || state.starting || (!running && !listenOn("mic"));
-  el.start.title = !running && !listenOn("mic") ? "Select a source to listen with first" : "Open the microphone and start decoding";
+  const canListen = listenOn("mic") || listenOn("camera");
+  el.start.disabled = state.starting || (!running && !canListen);
+  el.start.title = !running && !canListen ? "Select a source to listen with first" : "Open the selected sources and start decoding";
   el.pause.disabled = !running;
-  el.auto.disabled = !running;
+  el.auto.disabled = !micLive();
   el.save.disabled = !(running || (mic && mic.lastDump));
   el.encPlay.disabled = !encoder.guide.totalMs;
 }
@@ -627,7 +801,7 @@ function updateStatus() {
   let cls = "dot";
   let text;
   if (!state.supported) text = "Unavailable in this browser";
-  else if (state.starting) text = "Opening microphone…";
+  else if (state.starting) text = "Opening…";
   else if (state.running && state.paused) {
     dot = "●";
     cls = "dot paused";
@@ -640,7 +814,7 @@ function updateStatus() {
   else text = "Ready — press Start";
   el.stateDot.textContent = dot;
   el.stateDot.className = cls;
-  el.stateV.textContent = text;
+  el.stateV.textContent = state.running && camLive() ? `${text} · ${micLive() ? "microphone + camera" : "camera"}` : text;
   if (state.fs) {
     const khz = (state.fs / 1000).toFixed(state.fs % 1000 ? 1 : 0);
     el.blockV.textContent = `${state.blockSize}-sample blocks · ${state.blockMs.toFixed(state.blockMs % 1 ? 2 : 0)} ms`;
@@ -662,7 +836,7 @@ function updateStatus() {
 const auto = { active: false, acc: null, frames: 0, timer: 0, started: 0 };
 
 function startAutoDetect() {
-  if (auto.active || !state.running || !mic) return;
+  if (auto.active || !micLive()) return;
   const spec = mic.spectrumDb();
   if (!spec) return;
   auto.acc = new Float64Array(spec.length);
@@ -767,7 +941,7 @@ function fit(cv) {
   cv.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return cv;
 }
-["specCanvas", "powerCanvas", "stripCanvas", "meterCanvas", "waveCanvas", "histCanvas", "encCanvas"].forEach(setup);
+["specCanvas", "powerCanvas", "stripCanvas", "meterCanvas", "waveCanvas", "histCanvas", "encCanvas", "camCanvas"].forEach(setup);
 
 /** Centered two-line instruction on an empty plot (the resting state before Start). */
 function restingText(ctx, w, h, line1, line2) {
@@ -834,7 +1008,7 @@ function drawSpectrum() {
     ctx.fillText(f >= 1000 ? f / 1000 + "k" : "0", x(f), padT + ph + 6);
   }
 
-  if (state.running && mic) {
+  if (micLive()) {
     if (!state.paused || !specHold) {
       const s = mic.spectrumDb();
       if (s) {
@@ -1108,7 +1282,7 @@ function drawWave() {
   ctx.moveTo(0, h / 2 + 0.5);
   ctx.lineTo(w, h / 2 + 0.5);
   ctx.stroke();
-  if (state.running && mic && (!state.paused || !waveHold)) {
+  if (micLive() && (!state.paused || !waveHold)) {
     const s = mic.filteredWave(6);
     if (s) {
       if (!waveHold || waveHold.length !== s.length) waveHold = new Float32Array(s.length);
@@ -1263,7 +1437,7 @@ function togglePlay() {
  * a Web Audio connection.
  */
 function syncPlayerFeed() {
-  const bus = mic && state.running ? mic.bus : null;
+  const bus = micLive() && state.running ? mic.bus : null;
   const want = Boolean(bus) && el.encFeed.checked;
   for (const source of [player, liveKey]) {
     for (const node of source.outputs) if (node !== bus || !want) source.removeOutput(node);
@@ -1292,7 +1466,7 @@ function updateMicGate() {
     clearTimeout(micGateTimer);
     micGateTimer = null;
   }
-  if (!mic || !state.running || !el.encFeed.checked || !sendOn("audio") || !listenOn("mic")) {
+  if (!micLive() || !state.running || !el.encFeed.checked || !sendOn("audio") || !listenOn("mic")) {
     micGate.reset();
     if (mic) mic.setGate(false);
     return;
@@ -1338,7 +1512,7 @@ function sendingNow() {
 }
 
 function updateLamp() {
-  const rx = state.running && !state.paused && listenOn("mic") && detector.state;
+  const rx = state.running && !state.paused && ((listenOn("mic") && micLive() && detector.state) || (listenOn("camera") && camLive() && lightDet.state));
   const tx = sendOn("light") && sendingNow();
   lamp.setState(rx, tx);
 }
@@ -1400,6 +1574,7 @@ function exitFullLight() {
 
 function initChannels() {
   avail.listen.mic = state.supported;
+  avail.listen.camera = CameraInput.supported() && window.isSecureContext !== false;
   avail.send.vibrate = typeof navigator.vibrate === "function";
   try {
     channels = sanitizeChannels(JSON.parse(store.get(STORE_CHANNELS) || "null"));
@@ -1419,6 +1594,13 @@ function toggleChannel(group, key) {
   if (!avail[group][key]) return;
   channels[group][key] = !channels[group][key];
   applyChannels(true);
+  // While listening, a listen source can be added or dropped without a restart.
+  if (state.running && group === "listen" && key === "camera") {
+    if (listenOn("camera")) startCamera().catch((err) => showNote(describeCameraError(err)));
+    else stopCamera();
+  }
+  if (group === "listen" && key === "mic" && !listenOn("mic")) arbiter.release("mic");
+  updateStatus();
 }
 
 function applyChannels(persist) {
@@ -1936,6 +2118,7 @@ function drawAll() {
   drawWave();
   drawHist();
   drawEncGuide();
+  drawCamera();
   updateDom();
 }
 
@@ -2010,6 +2193,7 @@ function wire() {
     el.chopHint.hidden = true;
     state.chopDismissed = true;
   });
+  el.camView.addEventListener("click", setCamSpot);
   el.lightFullBtn.addEventListener("click", requestFullLight);
   el.lightFull.addEventListener("click", exitFullLight);
   el.flashOk.addEventListener("click", () => {

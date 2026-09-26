@@ -491,6 +491,25 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Camera listening (2026-09-26, v0.1.14; step 2 of the light work, page
+  only): `web/js/camera.js` `CameraInput` opens the rear camera
+  (`facingMode: environment`, ideal 640x480 at 60 fps), scales each frame to
+  160 px and reports the mean luma of a tapped spot (6 % of the shorter side)
+  per `requestVideoFrameCallback` (rAF fallback). `web/js/lightdetect.js`
+  `LightDetector` keeps dark and bright levels over a 6 s window (max of
+  neighbouring-pair minima for bright, min of pair maxima for dark, so a
+  one-frame reflection is ignored), gates on contrast >= 12 luma and >= 8x the
+  median frame-to-frame change, switches with 60/40 % hysteresis, and places
+  each edge at the mid-level crossing by walking back over frames already on
+  the new side; runs are 10 ms blocks for the shared `MorseDecoder`.
+  `SourceArbiter`: the first source to start a mark (an OFF run completes)
+  owns the message; the owner releases after `max(2 s, 8 dits)` of quiet;
+  only the owner's runs and idle flushes reach the decoder. Start opens every
+  selected source, continues with whichever opened, and the camera chip can
+  be toggled while listening. Tests: synthetic frames with exposure
+  integration, noise, drift and jitter (5, 8, 12 WPM at 30 fps; 16 WPM at
+  60 fps; 120 seeded cases), a noise-only and a one-frame-flash case, and two
+  delayed copies decoding once.
 - Channels, lamp, full-screen light, vibration, handset layout (2026-09-25,
   v0.1.13; step 1 of the light work): `morse/channels.py` and
   `web/js/channels.js` share the selection rules (`sanitize`, `effective`,

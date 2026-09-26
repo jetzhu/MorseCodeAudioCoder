@@ -386,6 +386,7 @@ two phones each sending and receiving by light; browser first. Steps:
 2. Camera as a listen source: preview, tap the light to track, brightness
    fed to the existing detector and decoder at the frame rate (about 30 Hz,
    which caps light decoding near 10 to 12 WPM); synthetic-frame tests.
+   Built 2026-09-26 (v0.1.14).
 3. Torch on Android Chrome behind capability detection, capped at 8 WPM.
 4. A link check between two phones (one sends a known word, the other
    grades it, reusing the practice scoring).
