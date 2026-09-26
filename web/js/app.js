@@ -31,6 +31,7 @@ import { Lamp } from "./light.js";
 import { CameraInput } from "./camera.js";
 import { LightDetector, SourceArbiter } from "./lightdetect.js";
 import { TORCH_MAX_WPM, Torch } from "./torch.js";
+import { LINK_TEST, gradeLink, testComplete } from "./linkcheck.js";
 import { Run } from "./runs.js";
 
 // ------------------------------------------------------------------ constants
@@ -146,6 +147,7 @@ const el = {
   flashNotice: $("flashNotice"), flashOk: $("flashOk"), flashCancel: $("flashCancel"),
   viewDesktop: $("viewDesktop"), viewHandset: $("viewHandset"), moreBtn: $("moreBtn"),
   camStrip: $("camStrip"), camView: $("camView"), camVideo: $("camVideo"), camSpot: $("camSpot"),
+  linkSend: $("linkSend"), linkCheck: $("linkCheck"), linkResult: $("linkResult"),
   camPill: $("camPill"), camLevel: $("camLevel"), camRange: $("camRange"), camFps: $("camFps"), camMax: $("camMax"),
   f0Label: $("f0Label"), specInfo: $("specInfo"),
   sym: $("symBuf"), hint: $("symHint"), text: $("textOut"),
@@ -288,6 +290,7 @@ function logEmit(text) {
   const audioMs = micLive() ? state.blocks * state.blockMs : performance.now() - (state.startedAt || performance.now());
   log.add(text, audioMs, Date.now());
   if (text.includes(" ") && log.text.trim()) maybeStarNudge(); // a whole word decoded
+  linkProgress();
 }
 
 // ------------------------------------------------------------------- stars
@@ -2003,6 +2006,62 @@ function updateReferenceDom() {
 }
 
 /** Play one character at the encoder speed through the speakers (and the feed while listening). */
+// ------------------------------------------------------------- link check
+
+/** Armed on the listening device: grades the decoded text after `from` against LINK_TEST. */
+const link = { armed: false, from: 0, timer: /** @type {ReturnType<typeof setTimeout> | null} */ (null) };
+
+function sendLinkTest() {
+  prepareTorch().then(() => {
+    playReference(LINK_TEST);
+    setLinkResult(`Sending ${LINK_TEST} at ${Math.round(encoder.wpm)} WPM…`, "");
+  });
+}
+
+function setLinkResult(text, cls) {
+  el.linkResult.textContent = text;
+  el.linkResult.className = "linkresult" + (cls ? ` ${cls}` : "");
+}
+
+function toggleLinkCheck() {
+  if (link.armed) {
+    finishLinkCheck();
+    return;
+  }
+  if (!state.running) {
+    setLinkResult("Press Start first: this device has to be listening.", "bad");
+    return;
+  }
+  logEmit(decoder.idle(Infinity)); // close any letter in progress so it is not graded
+  link.armed = true;
+  link.from = decoder.text.length;
+  el.linkCheck.classList.add("armed");
+  el.linkCheck.textContent = "Grade now";
+  setLinkResult(`Waiting for ${LINK_TEST}…`, "");
+  link.timer = setTimeout(finishLinkCheck, 90000);
+}
+
+/** Called whenever text is decoded: finish once the whole test has arrived. */
+function linkProgress() {
+  if (!link.armed) return;
+  const got = decoder.text.slice(Math.min(link.from, decoder.text.length));
+  if (testComplete(got)) finishLinkCheck();
+  else if (got.trim()) setLinkResult(`Receiving: ${got.trim()}`, "");
+}
+
+function finishLinkCheck() {
+  if (!link.armed) return;
+  link.armed = false;
+  if (link.timer !== null) clearTimeout(link.timer);
+  link.timer = null;
+  el.linkCheck.classList.remove("armed");
+  el.linkCheck.textContent = "Check link";
+  const got = decoder.text.slice(Math.min(link.from, decoder.text.length));
+  const g = gradeLink(got, { wpm: decoder.ditMs > 0 ? 1200 / decoder.ditMs : 0, fps: camLive() && arbiter.owner === "camera" ? lightDet.fps : 0 });
+  const pct = Math.round(100 * g.accuracy);
+  setLinkResult(`${pct}% (${g.correct}/${g.total})${g.received ? ` · "${g.received}"` : ""} · ${g.advice}`, g.perfect ? "good" : "bad");
+}
+
 function playReference(ch) {
   try {
     player.audioContext = ensureContext();
@@ -2244,6 +2303,8 @@ function wire() {
     state.chopDismissed = true;
   });
   el.camView.addEventListener("click", setCamSpot);
+  el.linkSend.addEventListener("click", sendLinkTest);
+  el.linkCheck.addEventListener("click", toggleLinkCheck);
   el.lightFullBtn.addEventListener("click", requestFullLight);
   el.lightFull.addEventListener("click", exitFullLight);
   el.flashOk.addEventListener("click", () => {

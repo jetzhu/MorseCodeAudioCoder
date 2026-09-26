@@ -491,6 +491,14 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Link check (2026-09-26, v0.1.16; step 4): `web/js/linkcheck.js`
+  (`LINK_TEST` = "VVV PARIS 73", `extractTest` from the last VVV,
+  `testComplete` at the closing 73 or full length, `gradeLink` with the
+  practice `score` plus advice by accuracy, camera frame rate and speed).
+  Chip bar buttons: Send link test plays the phrase on every selected send
+  channel at the send speed; Check link (while listening) arms grading of the
+  text decoded afterwards, finishing when the test has arrived, on Grade now,
+  or after 90 s.
 - Torch (2026-09-26, v0.1.15; step 3): `web/js/torch.js` `Torch` switches
   the `torch` constraint of a rear-camera track (`getCapabilities().torch`),
   borrowing the listening camera's track or opening its own on first use;

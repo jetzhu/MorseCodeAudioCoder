@@ -390,6 +390,6 @@ two phones each sending and receiving by light; browser first. Steps:
 3. Torch on Android Chrome behind capability detection, capped at 8 WPM.
    Built 2026-09-26 (v0.1.15).
 4. A link check between two phones (one sends a known word, the other
-   grades it, reusing the practice scoring).
+   grades it, reusing the practice scoring). Built 2026-09-26 (v0.1.16).
 Desktop: the lamp and full-screen window in step 1; a USB-serial DTR/RTS
 key line would be the way to drive an external lamp or a rig later.

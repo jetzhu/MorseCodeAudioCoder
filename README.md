@@ -69,6 +69,11 @@ turns the whole display into the lamp for sending across a room (a
 photosensitivity notice shows first). On the page, Handset in the title bar
 switches to a compact phone layout: lamp, key and text, the rest behind More.
 
+Before two people talk by light, run a link test: the receiving device
+presses Check link while listening, the sending one presses Send link test,
+and the receiver grades what arrived of "VVV PARIS 73" with advice on
+distance, light and speed.
+
 ## Reference chart
 
 Section G at the bottom of the console is a Morse code chart built from the
