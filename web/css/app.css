@@ -180,7 +180,10 @@ a { color: var(--spec); }
 
 /* ---------- handset layout ---------- */
 body.view-handset .page { padding: 6px 6px 24px; gap: 10px; max-width: none; }
-body.view-handset .intro, body.view-handset .dl, body.view-handset .notes, body.view-handset .about { display: none; }
+/* Every section stays on the phone page (it scrolls); only the fine-grained settings wait behind More. */
+body.view-handset .intro { gap: 10px; }
+body.view-handset .intro h1 { font-size: 22px; }
+body.view-handset .intro p { font-size: 14px; }
 body.view-handset .foot { font-size: 12px; }
 body.view-handset .win { border-radius: 6px; }
 body.view-handset .titlebar > span:not(.name):not(.viewswitch) { display: none; }
@@ -227,6 +230,7 @@ body.view-handset.hide-audio .timing { display: none; }
 body.view-handset .timing { border-left: 0; border-top: 1px solid var(--line); }
 body.view-handset .text { font-size: 22px; }
 body.view-handset .enc-right { display: none; }
+body.view-handset .practice .enc-right { display: grid; border-left: 0; border-top: 1px solid var(--line); }
 body.view-handset:not(.more-open) .enc-controls > :not(#encPlay):not(.field:has(#encWpm)) { display: none; }
 body.view-handset .enc-guide { height: 30px; }
 body.view-handset .keystrip .keyhelp, body.view-handset .keystrip #keyReset, body.view-handset .keystrip .rebind,
@@ -234,7 +238,6 @@ body.view-handset:not(.more-open) .keystrip .keyerrow, body.view-handset:not(.mo
 body.view-handset .keypad { width: 100%; }
 body.view-handset .keycol { flex: 1; }
 body.view-handset button.ctl.key.big { min-width: 0; width: 100%; height: 96px; font-size: 20px; }
-body.view-handset:not(.more-open) .practice, body.view-handset:not(.more-open) .reference { display: none; }
 body.view-handset .statusbar { font-size: 11px; gap: 10px; }
 body.view-handset .camleft { grid-template-columns: 1fr; }
 body.view-handset .camview, body.view-handset.light-l .camview { width: 100%; }
@@ -411,7 +414,8 @@ a.star .starcount:not(:empty)::before { content: " · "; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--ink);
   display: grid; grid-template-columns: minmax(0, 1fr) 300px; overflow: hidden;
 }
-.dl > div { padding: 16px 18px; }
+.dl > div { padding: 16px 18px; min-width: 0; }
+.dl code { overflow-wrap: anywhere; word-break: break-all; }
 .dl h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
 .dl p { margin: 4px 0 0; color: var(--ink-2); font-size: 14px; max-width: 62ch; }
 .dl .assets { border-left: 1px solid var(--line); background: var(--panel-2); font-size: 13px; display: grid; gap: 8px; align-content: start; }

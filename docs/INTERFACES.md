@@ -491,6 +491,11 @@ Behavioural requirements
   decoder's input bus like Play does. A Sent line decodes the operator's own
   keying locally (an adaptive `MorseDecoder` fed from the keyer's transition
   log) with a Clear button.
+- Handset sections (2026-09-27): the handset layout shows every section,
+  stacked (intro, console, Practice with its readouts, Reference, desktop app
+  download, notes, About and FAQ); More only reveals the fine-grained
+  settings (encoder options, keyer row, sidetone). The download panel wraps
+  long commands so nothing overflows a 390 px screen.
 - Neighbour-band filter (2026-09-27, v0.1.20): a block counts as tone only if
   it passes the tonality test and its tone bin stands `PEAKINESS_MIN_DB` = 8 dB
   above the mean power of the bands at f0 +-300 and +-600 Hz
